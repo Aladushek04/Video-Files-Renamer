@@ -223,8 +223,16 @@ class Scene:
 
 
 def studio_from_node(node: dict) -> Studio:
-    """Студия из узла GraphQL `{id, name, parent {id, name}}`."""
-    parent = node.get("parent") or None
+    """Студия из узла GraphQL `{id, name, parent {id, name}}`.
+
+    Битый узел (не словарь) и битый `parent` не считаются ошибкой:
+    отсутствующие поля остаются пустыми, как и у обычного узла без них.
+    """
+    if not isinstance(node, dict):
+        node = {}
+    parent = node.get("parent")
+    if not isinstance(parent, dict):
+        parent = None
     return Studio(
         id=node.get("id") or "",
         name=node.get("name") or "",
@@ -233,9 +241,19 @@ def studio_from_node(node: dict) -> Studio:
     )
 
 
-def _performer_from_entry(entry: dict) -> Performer:
-    """Исполнитель из элемента списка `{as, performer {id, name}}`."""
-    performer = entry.get("performer") or {}
+def _performer_from_entry(entry: object) -> Performer | None:
+    """Исполнитель из элемента списка `{as, performer {id, name}}`.
+
+    Битый элемент (не словарь или не-словарь в `performer`) пропускается:
+    один плохой узел не должен ломать разбор всей сцены.
+    """
+    if not isinstance(entry, dict):
+        return None
+    performer = entry.get("performer")
+    if performer is None:
+        performer = {}
+    elif not isinstance(performer, dict):
+        return None
     return Performer(
         id=performer.get("id") or "",
         name=performer.get("name") or "",
@@ -247,10 +265,18 @@ def scene_from_node(node: dict) -> Scene:
     """Сцена из узла GraphQL.
 
     Отсутствующие поля остаются `None`, `studio` может быть `None`,
-    пустой `performers` даёт пустой кортеж.
+    пустой `performers` даёт пустой кортеж. Некорректные вложенные узлы
+    (`studio` не словарь, битые элементы `performers`) пропускаются.
     """
-    studio_node = node.get("studio") or None
-    performers = node.get("performers") or []
+    studio_node = node.get("studio")
+    studio = (
+        studio_from_node(studio_node)
+        if isinstance(studio_node, dict) and studio_node
+        else None
+    )
+    performers = node.get("performers")
+    if not isinstance(performers, list):
+        performers = []
     return Scene(
         id=node.get("id") or "",
         title=node.get("title"),
@@ -258,8 +284,12 @@ def scene_from_node(node: dict) -> Scene:
         date=node.get("date"),
         code=node.get("code"),
         duration=node.get("duration"),
-        studio=studio_from_node(studio_node) if studio_node else None,
-        performers=tuple(_performer_from_entry(e) for e in performers),
+        studio=studio,
+        performers=tuple(
+            performer
+            for entry in performers
+            if (performer := _performer_from_entry(entry)) is not None
+        ),
     )
 
 

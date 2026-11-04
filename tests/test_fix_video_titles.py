@@ -1,4 +1,6 @@
 """Тесты CLI `fix_video_titles.py`: CSV-ревью и режимы preview/apply."""
+import csv
+
 import pytest
 
 import fix_video_titles
@@ -267,6 +269,28 @@ def test_apply_missing_csv_exits_2(tmp_path, capsys):
                  "--root", str(tmp_path), "--apply"])
     assert code == 2
     assert capsys.readouterr().err
+
+
+def test_apply_csv_parser_error_exits_2_without_traceback(tmp_path, capsys):
+    # Поле длиннее csv.field_size_limit() реально заставляет DictReader
+    # возбудить csv.Error, а не ValueError/OSError.
+    huge = "x" * (csv.field_size_limit() + 1)
+    csv_path = tmp_path / "broken.csv"
+    csv_path.write_text(
+        "approved;old;new;source;confidence;scene_id;note;oshash;size\n"
+        f"y;old.mp4;new.mp4;text;1.0;;{huge};;\n",
+        encoding="utf-8-sig",
+    )
+
+    code = main(["apply", str(csv_path), "--root", str(tmp_path),
+                 "--log", str(tmp_path / "rename_log.csv")])
+
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "cannot read" in err
+    assert "Traceback" not in err
+    assert not (tmp_path / "new.mp4").exists()
+    assert not (tmp_path / "rename_log.csv").exists()
 
 
 def test_append_rename_log_only_renamed_and_header_once(tmp_path):

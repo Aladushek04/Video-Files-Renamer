@@ -86,6 +86,52 @@ def test_studio_from_node_without_parent():
     assert studio.parent_name is None
 
 
+def test_studio_from_node_tolerates_malformed_node_and_parent():
+    assert studio_from_node({"id": "st1", "name": "A", "parent": "bad"}) == (
+        Studio("st1", "A")
+    )
+    assert studio_from_node({"id": "st2", "name": "B", "parent": 7}) == (
+        Studio("st2", "B")
+    )
+    assert studio_from_node("bad") == Studio("", "")
+
+
+def test_scene_from_node_skips_malformed_nested_nodes():
+    scene = scene_from_node({
+        "id": "s-bad", "title": "Still useful", "studio": "not-a-dict",
+        "performers": [
+            "not-a-dict",
+            {"as": "Bad", "performer": "not-a-dict"},
+            {"as": "Good", "performer": {"id": "p1", "name": "Good"}},
+            None,
+        ],
+    })
+    assert scene.id == "s-bad"
+    assert scene.title == "Still useful"
+    assert scene.studio is None
+    assert [p.display_name for p in scene.performers] == ["Good"]
+    assert Scene.from_dict(scene.to_dict()) == scene
+
+
+def test_search_scenes_tolerates_malformed_nested_nodes():
+    transport = transport_returning({"data": {"searchScene": [
+        {"id": "s1", "title": "T", "studio": "broken",
+         "performers": ["broken", {"as": "A", "performer": "broken"}]},
+        {"id": "s2", "title": "U",
+         "studio": {"id": "st1", "name": "A", "parent": "broken"},
+         "performers": [{"as": "B", "performer": {"id": "p2", "name": "B"}}]},
+    ]}})
+    client = StashDBClient("k", delay=0, transport=transport)
+
+    scenes = client.search_scenes("term")
+
+    assert [s.id for s in scenes] == ["s1", "s2"]
+    assert scenes[0].studio is None
+    assert scenes[0].performers == ()
+    assert scenes[1].studio == Studio("st1", "A")
+    assert scenes[1].performers[0].display_name == "B"
+
+
 def test_performer_display_name_prefers_alias():
     assert Performer("p1", "Real Name", "Alias").display_name == "Alias"
     assert Performer("p1", "Real Name").display_name == "Real Name"

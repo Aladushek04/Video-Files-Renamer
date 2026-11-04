@@ -344,7 +344,7 @@ def _run_apply(args: argparse.Namespace,
 
     try:
         rows = read_preview_csv(args.csv)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, csv.Error) as exc:
         print(f"error: cannot read {args.csv}: {exc}", file=sys.stderr)
         return 2
 
