@@ -10,6 +10,7 @@ from stashdb_client import (
     StashDBAuthError,
     StashDBClient,
     StashDBQueryError,
+    StashDBRateLimitError,
     StashDBResponseError,
     StashDBTransientError,
     Studio,
@@ -314,7 +315,7 @@ def test_429_retries_then_rate_limit():
 
     client = StashDBClient("k", delay=0, max_attempts=2,
                            sleep=lambda s: None, transport=_transport)
-    with pytest.raises(StashDBTransientError):
+    with pytest.raises(StashDBRateLimitError):
         client.search_scenes("test")
     assert len(attempts) == 2
 
