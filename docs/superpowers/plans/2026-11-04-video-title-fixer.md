@@ -668,7 +668,8 @@ Expected: PASS.
   `oshash_from_path`.
 - Produces:
   - `@dataclass(frozen=True) class ApplyResult`: `old_rel`, `new_rel`,
-    `status` (`renamed|skipped|error`), `message`.
+    `status` (`renamed|skipped|error`), `message`. `new_rel` — фактическое
+    итоговое имя, включая добавленный ` (2)` при `suffix_collisions`.
   - `@dataclass(frozen=True) class ApplyReport`: `results`, `had_errors`.
   - `TitleService.apply_rows(rows: Sequence[PreviewRow], *, dry_run=True, force=False, suffix_collisions=False) -> ApplyReport`
 
@@ -760,7 +761,7 @@ Expected: PASS.
   - `main(argv: Sequence[str] | None = None) -> int`
   - `write_preview_csv(path: str, rows: Sequence[PreviewRow]) -> None`
   - `read_preview_csv(path: str) -> list[PreviewRow]`
-  - `append_rename_log(path: str, results: Sequence[ApplyResult], timestamp: str) -> None`
+  - `append_rename_log(path: str, rows: Sequence[PreviewRow], results: Sequence[ApplyResult], timestamp: str) -> None`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -805,7 +806,9 @@ Expected: FAIL with `ModuleNotFoundError`
 `StashDBAuthError` → stderr «проверь STASHDB_API_KEY», код 2, CSV не писать.
 `StashDBQueryError` → stderr, код 2.
 `had_transient_errors` → код 1. `apply` пишет лог только для `renamed` и только
-с `--apply`. `--refresh` + `--offline` → `parser.error`.
+с `--apply`: `timestamp;old;new;oshash;scene_id;source`, где `new` — фактическое
+имя из `ApplyResult.new_rel` (с суффиксом, если он добавлен).
+`--refresh` + `--offline` → `parser.error`.
 Формула-guard для `old` и `new`: апостроф перед `= + - @`; при чтении снимать
 один апостроф.
 
