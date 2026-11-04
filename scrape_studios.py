@@ -456,6 +456,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 2
 
+    if (
+        checkpoint is not None
+        and not args.reset
+        and not initial
+        and (
+            checkpoint.count > 0
+            or (not checkpoint.complete and checkpoint.page >= 1)
+        )
+    ):
+        print(
+            f"error: checkpoint {args.checkpoint} expects "
+            f"{checkpoint.count} studio(s), but raw studios {args.raw} "
+            f"is missing or empty; resume would lose earlier pages; "
+            f"pass --reset to start from page 1",
+            file=sys.stderr,
+        )
+        return 2
+
     if checkpoint is not None and checkpoint.complete and not args.reset:
         studios = tuple(_unique_studios(initial))
         report = ScrapeReport(studios, checkpoint.page + 1, True, 0)

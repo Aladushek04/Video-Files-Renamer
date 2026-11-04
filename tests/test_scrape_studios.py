@@ -335,6 +335,82 @@ def test_main_resumes_from_checkpoint_and_raw(tmp_path, monkeypatch):
     assert load_checkpoint(str(cp)) == Checkpoint(2, 2, 3, True)
 
 
+def test_main_incomplete_checkpoint_without_raw_returns_2(
+        tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("STASHDB_API_KEY", "key")
+    fake = FakeClient({2: ([Studio("3", "C")], 1)})
+    install_client(monkeypatch, fake)
+
+    out = tmp_path / "studios.json"
+    cp = tmp_path / "cp.json"
+    raw = tmp_path / "raw.json"
+    save_checkpoint(str(cp), Checkpoint(1, 2, 3, False))
+
+    code = main([
+        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
+        "--per-page", "2", "--delay", "0", "--apply",
+    ])
+
+    assert code == 2
+    error = capsys.readouterr().err
+    assert "--reset" in error
+    assert str(raw) in error
+    assert fake.calls == []
+    assert not out.exists()
+    assert not raw.exists()
+    assert load_checkpoint(str(cp)) == Checkpoint(1, 2, 3, False)
+
+
+def test_main_complete_checkpoint_without_raw_returns_2(
+        tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("STASHDB_API_KEY", "key")
+    fake = FakeClient({})
+    install_client(monkeypatch, fake)
+
+    out = tmp_path / "studios.json"
+    out.write_text(json.dumps({"manual": "Manual Studio"}),
+                   encoding="utf-8")
+    cp = tmp_path / "cp.json"
+    raw = tmp_path / "raw.json"
+    save_checkpoint(str(cp), Checkpoint(1, 2, 3, True))
+
+    code = main([
+        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
+        "--per-page", "2", "--delay", "0", "--apply",
+    ])
+
+    assert code == 2
+    assert "--reset" in capsys.readouterr().err
+    assert fake.calls == []
+    assert read_json(out) == {"manual": "Manual Studio"}
+    assert not (tmp_path / "studios.json.bak").exists()
+    assert not (tmp_path / "studios_collisions.json").exists()
+
+
+def test_main_incomplete_checkpoint_with_empty_raw_returns_2(
+        tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("STASHDB_API_KEY", "key")
+    fake = FakeClient({2: ([Studio("3", "C")], 1)})
+    install_client(monkeypatch, fake)
+
+    out = tmp_path / "studios.json"
+    cp = tmp_path / "cp.json"
+    raw = tmp_path / "raw.json"
+    save_raw(str(raw), [])
+    save_checkpoint(str(cp), Checkpoint(1, 2, 3, False))
+
+    code = main([
+        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
+        "--per-page", "2", "--delay", "0", "--apply",
+    ])
+
+    assert code == 2
+    assert "--reset" in capsys.readouterr().err
+    assert fake.calls == []
+    assert not out.exists()
+    assert load_raw(str(raw)) == []
+
+
 def test_main_per_page_mismatch_requires_reset(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("STASHDB_API_KEY", "key")
     fake = FakeClient({})
