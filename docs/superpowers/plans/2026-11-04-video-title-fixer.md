@@ -942,36 +942,50 @@ Expected: PASS.
 - Consumes: всё выше.
 - Produces: инструкция запуска и безопасный smoke-прогон.
 
-- [ ] **Step 1: Написать README**
+- [x] **Step 1: Написать README**
 
 Разделы: что это, требования (Python 3.14, ключ StashDB), быстрый старт,
 `preview` → ревью CSV → `apply`, колонки CSV, offline/refresh, лимиты StashDB,
 скрапер студий, troubleshooting (401, нет совпадений, Excel-разделитель),
 будущий TUI. Без секретов.
 
-- [ ] **Step 2: Добавить `.gitignore`**
+- [x] **Step 2: Добавить `.gitignore`**
 
 `__pycache__/`, `.pytest_cache/`, `.venv/`, `cache/`, `preview.csv`,
 `rename_log.csv`, `studios_raw.json`, `studios_checkpoint.json`,
 `studios_collisions.json`, `studios.json.bak`, `.env`.
 
-- [ ] **Step 3: Полный прогон тестов**
+- [x] **Step 3: Полный прогон тестов**
 
 Run: `python -m pytest -q`
 Expected: PASS.
 
-- [ ] **Step 4: Offline smoke на реальной папке**
+- [x] **Step 4: Offline smoke на реальной папке**
 
 Run: `python fix_video_titles.py preview D:\Videos\PH --limit 2 --offline --csv preview_smoke.csv`
 Expected: команда завершается 0, `preview_smoke.csv` создан, видео не
 переименованы. Проверить, что в CSV 2 строки и `source=heuristic`. Удалить
 `preview_smoke.csv` после проверки.
 
-- [ ] **Step 5: Checkpoint**
+- [x] **Step 5: Checkpoint**
 
 Записать в план фактические результаты smoke и полного pytest. Живой прогон с
 реальным ключом и `--limit 5` выполняет человек; ожидаемый результат — CSV с
 `source=fingerprint` или `text` для найденных сцен.
+
+Фактические результаты (2026-11-04, Task 11):
+
+- `python -m pytest -q` → `207 passed in 1.75s`, код возврата 0.
+- `python fix_video_titles.py preview D:\Videos\PH --limit 2 --offline --csv preview_smoke.csv`
+  → stdout `2 row(s) written to preview_smoke.csv`, код возврата 0; в CSV
+  2 строки данных, у обеих `source=heuristic`, `approved=n`, `scene_id` пуст,
+  `note=нет текстовых кандидатов`; снимок `D:\Videos\PH` (55 файлов: имена,
+  размеры, mtime) до и после прогона совпал полностью — переименований не
+  было, временных `__ren_tmp_*` не осталось; `preview_smoke.csv` удалён после
+  проверки.
+- Живой прогон с реальным ключом и `--limit 5` не выполнялся: переменной
+  `STASHDB_API_KEY` в окружении нет. Его выполняет человек; ожидаемый
+  результат — CSV с `source=fingerprint` или `text` для найденных сцен.
 
 ---
 
