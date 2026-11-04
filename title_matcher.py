@@ -11,22 +11,35 @@ Windows-санитизация заменяет запрещённые симв�
 точки/пробелы и добавляет `_` к зарезервированным именам (`CON`, `PRN`,
 `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`). Unicode сохраняется.
 
+Текстовые кандидаты оцениваются по сходству названия, исполнителям, студии и
+дате; `resolve_match` выбирает сцену, собирает stem и решает, можно ли
+одобрить переименование без человека.
+
 Зависимостей нет — только стандартная библиотека.
 """
 import re
+import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 
 from clean_ph_names import build_new_name, clean_stem, prepare_stem, split_name
 from stashdb_client import Scene
 
 __all__ = [
     "LocalNameInfo",
+    "MatchResult",
+    "ScoredScene",
     "build_heuristic_stem",
     "build_scene_stem",
     "format_scene_date",
     "is_valid_final_stem",
+    "normalize_for_match",
     "parse_local_name",
+    "pick_text_match",
+    "resolve_match",
     "sanitize_windows_stem",
+    "score_scene",
 ]
 
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -40,6 +53,18 @@ _RESERVED_NAMES = frozenset(
     | {f"LPT{i}" for i in range(1, 10)}
 )
 _MAX_STEM_LENGTH = 255
+
+# Веса сигналов скоринга; недоступные сигналы выбрасываются с перенормировкой.
+_WEIGHT_TITLE = 0.55
+_WEIGHT_PERFORMER = 0.25
+_WEIGHT_STUDIO = 0.10
+_WEIGHT_DATE = 0.10
+
+_TEXT_THRESHOLD = 0.85
+_TITLE_GUARD = 0.90
+_PERFORMER_GUARD = 0.50
+_AMBIGUITY_GAP = 0.05
+_TOP_CANDIDATES = 3
 
 
 @dataclass(frozen=True)
@@ -106,10 +131,10 @@ def is_valid_final_stem(stem: str) -> bool:
     return not _is_reserved(stem)
 
 
-def build_scene_stem(
-    scene: Scene, local: LocalNameInfo, studios: dict[str, str]
-) -> str:
-    """Итоговый stem из официальных полей сцены с локальными fallback-ами."""
+def _scene_blocks(
+    scene: Scene, local: LocalNameInfo
+) -> tuple[str, str, tuple[str, ...], str]:
+    """Блоки итогового имени: студия, дата, исполнители, название."""
     studio = ""
     if scene.studio is not None and (scene.studio.name or "").strip():
         studio = scene.studio.name
@@ -122,12 +147,348 @@ def build_scene_stem(
     if date is None:
         date = local.date
 
-    actors = [p.display_name for p in scene.performers if p.display_name.strip()]
+    actors = tuple(p.display_name for p in scene.performers if p.display_name.strip())
     title = scene.title if (scene.title or "").strip() else local.rest
+    return studio, date, actors, title
 
+
+def build_scene_stem(
+    scene: Scene, local: LocalNameInfo, studios: dict[str, str]
+) -> str:
+    """Итоговый stem из официальных полей сцены с локальными fallback-ами."""
+    studio, date, actors, title = _scene_blocks(scene, local)
     return sanitize_windows_stem(build_new_name(studio, date, actors, title))
 
 
 def build_heuristic_stem(local: LocalNameInfo, studios: dict[str, str]) -> str:
     """Эвристический stem из локального имени (старый конвейер)."""
     return sanitize_windows_stem(clean_stem(local.stem, studios))
+
+
+def normalize_for_match(text: str) -> str:
+    """Нормализует строку для сравнения: NFKD, без диакритики, lower, пробелы."""
+    if not text:
+        return ""
+    decomposed = unicodedata.normalize("NFKD", text)
+    without_marks = "".join(
+        char for char in decomposed if not unicodedata.combining(char)
+    )
+    spaced = "".join(
+        char.lower() if char.isalnum() else " " for char in without_marks
+    )
+    return _WS.sub(" ", spaced).strip()
+
+
+def _jaccard(left: str, right: str) -> float:
+    """Jaccard по токенам уже нормализованных строк."""
+    left_tokens = set(left.split())
+    right_tokens = set(right.split())
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+
+
+def _similarity(left: str, right: str) -> float:
+    """Максимум SequenceMatcher.ratio() и Jaccard по токенам."""
+    norm_left = normalize_for_match(left)
+    norm_right = normalize_for_match(right)
+    if not norm_left or not norm_right:
+        return 0.0
+    ratio = SequenceMatcher(None, norm_left, norm_right).ratio()
+    return max(ratio, _jaccard(norm_left, norm_right))
+
+
+def _performer_signal(scene: Scene, stem_norm: str) -> tuple[float, bool]:
+    """Доля исполнителей сцены, чьё имя есть в нормализованном stem."""
+    names = [
+        normalize_for_match(performer.display_name)
+        for performer in scene.performers
+    ]
+    names = [name for name in names if name]
+    if not names:
+        return 0.0, False
+    haystack = f" {stem_norm} "
+    found = sum(1 for name in names if f" {name} " in haystack)
+    return found / len(names), True
+
+
+def _studio_signal(
+    scene: Scene, local: LocalNameInfo, stem_norm: str
+) -> tuple[float, bool]:
+    """1/0: студия сцены совпала с распознанной или встречается в stem."""
+    name = ""
+    if scene.studio is not None:
+        name = normalize_for_match(scene.studio.name)
+    if not name:
+        return 0.0, False
+
+    compact_name = name.replace(" ", "")
+    local_studio = normalize_for_match(local.studio or "")
+    if local_studio:
+        compact_local = local_studio.replace(" ", "")
+        if (
+            compact_local == compact_name
+            or compact_local in compact_name
+            or compact_name in compact_local
+        ):
+            return 1.0, True
+    compact_stem = stem_norm.replace(" ", "")
+    return (1.0 if compact_name in compact_stem else 0.0), True
+
+
+def _scene_date(scene: Scene) -> str | None:
+    """Дата сцены в `ДД.ММ.ГГГГ` из актуального или устаревшего поля."""
+    return format_scene_date(scene.release_date) or format_scene_date(scene.date)
+
+
+def _date_signal(scene: Scene, local: LocalNameInfo) -> tuple[float, bool]:
+    """1 при полной дате, 0.5 при совпадении года, иначе 0."""
+    scene_date = _scene_date(scene)
+    local_date = local.date
+    if not scene_date or not local_date:
+        return 0.0, False
+    if scene_date == local_date:
+        return 1.0, True
+    scene_year = scene_date.rsplit(".", 1)[-1]
+    local_year = local_date.rsplit(".", 1)[-1]
+    if scene_year == local_year:
+        return 0.5, True
+    return 0.0, True
+
+
+@dataclass(frozen=True)
+class ScoredScene:
+    """Сцена с оценкой сходства и её сигналами."""
+
+    scene: Scene
+    score: float
+    title_sim: float
+    performer_hit: float
+    studio_hit: float
+    date_hit: float
+
+
+def score_scene(
+    scene: Scene, local: LocalNameInfo, studios: dict[str, str]
+) -> ScoredScene:
+    """Считает сходство сцены с локальным именем.
+
+    `studios` принимается для единообразия с `resolve_match`; скоринг
+    использует уже разобранный `local.studio`. Недоступные сигналы (нет
+    названия, исполнителей, студии, даты) выбрасываются, веса оставшихся
+    перенормируются.
+    """
+    stem_norm = normalize_for_match(local.stem)
+    title_sim = _similarity(local.rest, scene.title or "")
+    performer_hit, performer_ok = _performer_signal(scene, stem_norm)
+    studio_hit, studio_ok = _studio_signal(scene, local, stem_norm)
+    date_hit, date_ok = _date_signal(scene, local)
+
+    signals: list[tuple[float, float]] = []
+    if normalize_for_match(local.rest) and normalize_for_match(scene.title or ""):
+        signals.append((_WEIGHT_TITLE, title_sim))
+    if performer_ok:
+        signals.append((_WEIGHT_PERFORMER, performer_hit))
+    if studio_ok:
+        signals.append((_WEIGHT_STUDIO, studio_hit))
+    if date_ok:
+        signals.append((_WEIGHT_DATE, date_hit))
+
+    total_weight = sum(weight for weight, _ in signals)
+    score = (
+        sum(weight * value for weight, value in signals) / total_weight
+        if total_weight
+        else 0.0
+    )
+    return ScoredScene(
+        scene=scene,
+        score=score,
+        title_sim=title_sim,
+        performer_hit=performer_hit,
+        studio_hit=studio_hit,
+        date_hit=date_hit,
+    )
+
+
+def pick_text_match(
+    scored: Sequence[ScoredScene],
+) -> tuple[ScoredScene | None, bool]:
+    """Лучший текстовый кандидат и признак неоднозначности.
+
+    Кандидат проходит, если `score >= 0.85` и сработал guard:
+    `performer_hit >= 0.5` или `title_sim >= 0.90`. Неоднозначность — разрыв
+    с лучшим из оставшихся прошедших кандидатов меньше 0.05.
+    """
+    eligible = [
+        item
+        for item in scored
+        if item.score >= _TEXT_THRESHOLD
+        and (
+            item.performer_hit >= _PERFORMER_GUARD
+            or item.title_sim >= _TITLE_GUARD
+        )
+    ]
+    if not eligible:
+        return None, False
+    ranked = sorted(eligible, key=lambda item: (-item.score, item.scene.id))
+    best = ranked[0]
+    ambiguous = len(ranked) > 1 and best.score - ranked[1].score < _AMBIGUITY_GAP
+    return best, ambiguous
+
+
+@dataclass(frozen=True)
+class MatchResult:
+    """Результат сопоставления локального имени со сценами StashDB."""
+
+    source: str
+    confidence: float
+    scene: Scene | None
+    candidates: tuple[Scene, ...] = ()
+    new_stem: str = ""
+    note: str = ""
+    approved: bool = False
+
+
+def _heuristic_stem(local: LocalNameInfo, studios: dict[str, str]) -> str:
+    """Эвристический stem, а при пустом результате — исходный stem."""
+    return build_heuristic_stem(local, studios) or local.stem
+
+
+def _has_title(scene: Scene) -> bool:
+    return bool((scene.title or "").strip())
+
+
+def _other_block_count(scene: Scene) -> int:
+    """Сколько блоков, кроме названия, даёт сама сцена.
+
+    Локальные fallback-и не считаются: пустая сцена должна уходить в
+    эвристику, а не одобряться за счёт данных из имени файла.
+    """
+    studio = bool(scene.studio and (scene.studio.name or "").strip())
+    date = _scene_date(scene) is not None
+    actors = any(
+        (performer.display_name or "").strip()
+        for performer in scene.performers
+    )
+    return sum((studio, date, actors))
+
+
+def _signals_note(scored: ScoredScene) -> str:
+    return (
+        f"score={scored.score:.3f}, title_sim={scored.title_sim:.3f}, "
+        f"performer_hit={scored.performer_hit:.2f}, "
+        f"studio_hit={scored.studio_hit:.0f}, date_hit={scored.date_hit:.1f}"
+    )
+
+
+def resolve_match(
+    local: LocalNameInfo,
+    studios: dict[str, str],
+    fingerprint_scenes: Sequence[Scene],
+    text_scenes: Sequence[Scene],
+) -> MatchResult:
+    """Выбирает сцену, собирает итоговый stem и решает, можно ли одобрить.
+
+    Уникальный fingerprint одобряется автоматически только при валидном
+    итоговом stem и содержательном имени (название или два других блока).
+    Текстовое совпадение используется при `score >= 0.85` и пройденном
+    guard, но никогда не одобряется автоматически.
+    """
+    if len(fingerprint_scenes) == 1:
+        scene = fingerprint_scenes[0]
+        stem = build_scene_stem(scene, local, studios)
+        if is_valid_final_stem(stem) and (
+            _has_title(scene) or _other_block_count(scene) >= 2
+        ):
+            return MatchResult(
+                source="fingerprint",
+                confidence=1.0,
+                scene=scene,
+                candidates=(scene,),
+                new_stem=stem,
+                note="",
+                approved=True,
+            )
+        return MatchResult(
+            source="fingerprint",
+            confidence=1.0,
+            scene=scene,
+            candidates=(scene,),
+            new_stem=_heuristic_stem(local, studios),
+            note="имя сцены неполное, heuristic fallback",
+            approved=False,
+        )
+
+    if len(fingerprint_scenes) >= 2:
+        scored = sorted(
+            (
+                score_scene(scene, local, studios)
+                for scene in fingerprint_scenes
+            ),
+            key=lambda item: (-item.score, item.scene.id),
+        )
+        best = scored[0]
+        stem = build_scene_stem(best.scene, local, studios)
+        note = "совпадения fingerprint: " + ", ".join(
+            f"{item.scene.id}={item.score:.2f}" for item in scored
+        )
+        if not is_valid_final_stem(stem):
+            stem = _heuristic_stem(local, studios)
+            note += "; имя сцены неполное, heuristic fallback"
+        return MatchResult(
+            source="fingerprint",
+            confidence=0.99,
+            scene=best.scene,
+            candidates=tuple(item.scene for item in scored),
+            new_stem=stem,
+            note=note,
+            approved=False,
+        )
+
+    scored_text = sorted(
+        (score_scene(scene, local, studios) for scene in text_scenes),
+        key=lambda item: (-item.score, item.scene.id),
+    )
+    best, ambiguous = pick_text_match(scored_text)
+    if best is not None:
+        stem = build_scene_stem(best.scene, local, studios)
+        note = "ambiguous" if ambiguous else "text: " + _signals_note(best)
+        if not is_valid_final_stem(stem):
+            stem = _heuristic_stem(local, studios)
+            if not ambiguous:
+                note += "; имя сцены неполное, heuristic fallback"
+        return MatchResult(
+            source="text",
+            confidence=best.score,
+            scene=best.scene,
+            candidates=tuple(
+                item.scene for item in scored_text[:_TOP_CANDIDATES]
+            ),
+            new_stem=stem,
+            note=note,
+            approved=False,
+        )
+
+    top = scored_text[:_TOP_CANDIDATES]
+    if not scored_text:
+        reason = "нет текстовых кандидатов"
+    elif scored_text[0].score < _TEXT_THRESHOLD:
+        reason = (
+            f"лучший score {scored_text[0].score:.2f} < "
+            f"{_TEXT_THRESHOLD:.2f}"
+        )
+    else:
+        reason = "текстовый guard не пройден"
+    if top:
+        reason += "; top: " + ", ".join(
+            f"{item.scene.id}={item.score:.2f}" for item in top
+        )
+    return MatchResult(
+        source="heuristic",
+        confidence=0.0,
+        scene=None,
+        candidates=tuple(item.scene for item in top),
+        new_stem=_heuristic_stem(local, studios),
+        note=reason,
+        approved=False,
+    )
