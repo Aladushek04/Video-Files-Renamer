@@ -286,7 +286,7 @@ def test_text_search_is_used_when_fingerprint_is_empty(tmp_path):
     assert row.scene_id == "s1"
 
 
-def test_text_search_reads_cache_offline_without_network(tmp_path):
+def test_offline_text_search_uses_cache_without_network(tmp_path):
     name = "ryan reid poking glory.mp4"
     write(tmp_path / name)
     term = normalize_for_match(parse_local_name(name, {}).rest)
@@ -300,6 +300,8 @@ def test_text_search_reads_cache_offline_without_network(tmp_path):
 
     assert client.hash_calls == []
     assert client.text_calls == []
+    assert cache.text_gets == [term]
+    assert report.had_transient_errors is False
     assert report.rows[0].source == "text"
 
 

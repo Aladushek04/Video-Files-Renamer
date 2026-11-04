@@ -404,7 +404,12 @@ class TitleService:
     def _resolve_text(
         self, candidates: Sequence[_Candidate], warnings: list[str]
     ) -> set[str]:
-        """Текстовый поиск для файлов без fingerprint; возвращает rel сбоев."""
+        """Текстовый поиск для файлов без fingerprint.
+
+        Кэш текстовых запросов читается и в `offline`-режиме: `offline`
+        запрещает только сеть. Сетевой вызов гейтится отдельно —
+        `client is not None and not offline` (см. `_network_allowed`).
+        """
         pending: list[tuple[_Candidate, str]] = []
         if self._text_search:
             for candidate in candidates:
