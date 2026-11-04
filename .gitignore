@@ -1,0 +1,12 @@
+__pycache__/
+.pytest_cache/
+.venv/
+cache/
+preview.csv
+rename_log.csv
+studios_raw.json
+studios_checkpoint.json
+studios_collisions.json
+studios.json.bak
+.env
+.superpowers/
