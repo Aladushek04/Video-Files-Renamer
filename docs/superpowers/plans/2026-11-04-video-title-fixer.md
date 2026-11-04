@@ -629,9 +629,10 @@ Expected: FAIL with `ModuleNotFoundError`
   `find_scenes_by_hashes`; `put_fingerprint` для каждого (включая `[]`).
 - `StashDBTransientError` → warning, `had_transient_errors=True`, считать
   результат `[]`. `StashDBAuthError`/`StashDBQueryError` пробросить.
-- Если fingerprint пуст и `text_search`, `client is not None` и не `offline`:
-  ключ `normalize_for_match(local.rest)`, кэш `get_text_query`, иначе
-  `search_scenes`; `put_text_query`.
+- Если fingerprint пуст и `text_search`: ключ `normalize_for_match(local.rest)`,
+  кэш `get_text_query` читается всегда (включая `--offline`); сетевой
+  `search_scenes` вызывается только при `client is not None` и `offline=False`;
+  `put_text_query`.
 - `StashDBTransientError` в текстовом поиске — тот же warning,
   `had_transient_errors=True`, `text_scenes=[]`; в `note` строки добавить
   `stashdb_error`.
