@@ -45,11 +45,16 @@ def strip_tech_junk(stem: str) -> str:
     return s
 
 
+def normalize_studio_key(name: str) -> str:
+    """Ключ студии: lower без пробелов, точек, подчёркиваний и дефисов."""
+    return _KEY_NORM.sub("", name.lower())
+
+
 def load_studios(path: str) -> dict:
     """Читает studios.json; ключи приводит к lower без разделителей."""
     with open(path, encoding="utf-8") as f:
         raw = json.load(f)
-    return {_KEY_NORM.sub("", str(k).lower()): v for k, v in raw.items()}
+    return {normalize_studio_key(str(k)): v for k, v in raw.items()}
 
 
 def extract_date(stem: str) -> tuple:
@@ -80,15 +85,25 @@ def extract_date(stem: str) -> tuple:
     return stem, None
 
 
+_STUDIO_MAX_TOKENS = 5
+_STUDIO_MIN_KEY = 4
+
+
 def extract_studio(stem: str, studios: dict) -> tuple:
-    """Первый токен как студия по словарю. Возвращает (студия или None, остаток)."""
-    parts = stem.split(None, 1)
-    if not parts:
+    """Студия — самый длинный префикс из 1–5 слов, найденный в словаре.
+
+    Возвращает (студия или None, остаток). Ключи короче 4 символов
+    игнорируются, чтобы случайные слова не принимались за студию.
+    """
+    tokens = stem.split()
+    if not tokens:
         return None, stem
-    key = _KEY_NORM.sub("", parts[0].lower())
-    if key in studios:
-        return studios[key], (parts[1] if len(parts) > 1 else "")
-    # Склейка без разделителей: brazzersexxtra26? Нет — дата уже вырезана, берем как есть.
+    for size in range(min(_STUDIO_MAX_TOKENS, len(tokens)), 0, -1):
+        key = normalize_studio_key(" ".join(tokens[:size]))
+        if len(key) < _STUDIO_MIN_KEY:
+            continue
+        if key in studios:
+            return studios[key], " ".join(tokens[size:])
     return None, stem
 
 
@@ -99,6 +114,24 @@ _EPORNER = re.compile(r"(?i)^eporner\s*com\s*(-\s*)?")
 def split_camel(s: str) -> str:
     """Вставляет пробел на границе lower->Upper: PhillipsJenna -> Phillips Jenna."""
     return _CAMEL.sub(" ", s)
+
+
+def prepare_stem(stem: str, studios: dict) -> tuple:
+    """Готовит stem: вырезает дату, техмусор и студию, разбивает camelCase.
+
+    Возвращает (остаток, дата ДД.ММ.ГГГГ или None, студия или None).
+    """
+    s, date = extract_date(stem)
+    s = strip_tech_junk(s)
+    s = _HASH_BRACKET.sub(" ", s)
+    s = s.replace("[", " ").replace("]", " ")
+    s = _EMPTY_PAREN.sub(" ", s)
+    s = _EPORNER.sub("", s).strip()
+    s = _WS.sub(" ", s).strip(" -")
+    studio, s = extract_studio(s, studios)
+    s = split_camel(s)
+    s = _WS.sub(" ", s).strip(" -")
+    return s, date, studio
 
 
 def _title_case(text: str) -> str:
@@ -219,16 +252,7 @@ def build_new_name(studio, date, actors, title) -> str:
 
 def clean_stem(stem: str, studios: dict) -> str:
     """Полный конвейер для stem без расширения."""
-    s, date = extract_date(stem)
-    s = strip_tech_junk(s)
-    s = _HASH_BRACKET.sub(" ", s)
-    s = s.replace("[", " ").replace("]", " ")
-    s = _EMPTY_PAREN.sub(" ", s)
-    s = _EPORNER.sub("", s).strip()
-    s = _WS.sub(" ", s).strip(" -")
-    studio, s = extract_studio(s, studios)
-    s = split_camel(s)
-    s = _WS.sub(" ", s).strip(" -")
+    s, date, studio = prepare_stem(stem, studios)
     actors, title = split_actors_title(s)
     return build_new_name(studio, date, actors, title)
 

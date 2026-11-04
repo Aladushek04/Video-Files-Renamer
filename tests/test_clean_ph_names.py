@@ -6,6 +6,8 @@ from clean_ph_names import (
     extract_date,
     extract_studio,
     load_studios,
+    normalize_studio_key,
+    prepare_stem,
     preview_directory,
     split_actors_title,
     split_camel,
@@ -47,6 +49,33 @@ def test_extract_date_yyyy_mm_dd():
 def test_extract_studio_from_dict():
     studios = {"brazzersexxtra": "BrazzersExxtra"}
     studio, rest = extract_studio("brazzersexxtra ryan reid", studios)
+    assert studio == "BrazzersExxtra"
+
+
+def test_multitoken_studio_prefix():
+    studios = {"hussiepass": "HussiePass", "brazzersexxtra": "BrazzersExxtra"}
+    studio, rest = extract_studio("Hussie Pass Anastasia Shades", studios)
+    assert studio == "HussiePass" and rest == "Anastasia Shades"
+    studio, rest = extract_studio("Brazzers Exxtra Ryan Reid", studios)
+    assert studio == "BrazzersExxtra" and rest == "Ryan Reid"
+
+
+def test_extract_studio_ignores_short_keys():
+    studio, rest = extract_studio("abc Ryan Reid", {"abc": "Abc"})
+    assert studio is None and rest == "abc Ryan Reid"
+
+
+def test_normalize_studio_key_strips_separators():
+    assert normalize_studio_key("Hussie Pass.26_x-2") == "hussiepass26x2"
+
+
+def test_prepare_stem_returns_parts():
+    studios = {"brazzersexxtra": "BrazzersExxtra"}
+    rest, date, studio = prepare_stem(
+        "brazzers-exxtra 26.10.03 ryan reid poking glory", studios
+    )
+    assert rest == "ryan reid poking glory"
+    assert date == "03.10.2026"
     assert studio == "BrazzersExxtra"
 
 
