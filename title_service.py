@@ -387,19 +387,29 @@ class TitleService:
             elif item is not None:
                 items.append(item)
 
-        moving = {_path_key(item.old_path) for item in items}
-        claimed: set[str] = set()
+        pending = items
         ready: list[_ApplyItem] = []
-        for item in items:
-            error = self._resolve_apply_target(
-                item, moving, claimed, suffix_collisions
-            )
-            if error:
-                results[item.index] = ApplyResult(
-                    item.row.old_rel, item.row.new_rel, "error", error
+        while pending:
+            moving = {_path_key(item.old_path) for item in pending}
+            claimed: set[str] = set()
+            ready = []
+            blocked: list[_ApplyItem] = []
+            for item in pending:
+                error = self._resolve_apply_target(
+                    item, moving, claimed, suffix_collisions
                 )
-            else:
-                ready.append(item)
+                if error:
+                    results[item.index] = ApplyResult(
+                        item.row.old_rel, item.row.new_rel, "error", error
+                    )
+                    blocked.append(item)
+                else:
+                    ready.append(item)
+            if not blocked:
+                break
+            # Заблокированная строка не войдёт в phase one: её old path
+            # остаётся занятым и может сделать невалидными другие цели.
+            pending = ready
 
         if dry_run:
             for item in ready:
@@ -463,6 +473,8 @@ class TitleService:
         old_rel = row.old_rel
         new_rel = row.new_rel
         for label, value in (("old", old_rel), ("new", new_rel)):
+            if "\0" in value:
+                return None, f"{label} path contains NUL"
             if (not value or os.path.isabs(value) or ntpath.isabs(value)
                     or os.path.splitdrive(value)[0]
                     or ntpath.splitdrive(value)[0]):

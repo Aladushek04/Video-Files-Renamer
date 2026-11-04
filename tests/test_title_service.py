@@ -715,10 +715,40 @@ def test_apply_dry_run_validates_without_changing_files(tmp_path):
         report.had_errors = True
 
 
+def test_apply_dry_run_invalidates_dependents_of_blocked_rows(tmp_path):
+    for name in ("a.mp4", "b.mp4", "c.mp4"):
+        (tmp_path / name).write_bytes(b"abc")
+    service = apply_service(tmp_path)
+    rows = [row("a.mp4", "b.mp4"), row("b.mp4", "c.mp4")]
+
+    dry_report = service.apply_rows(rows)
+    assert [result.status for result in dry_report.results] == ["error", "error"]
+
+    apply_report = service.apply_rows(rows, dry_run=False)
+    assert [result.status for result in apply_report.results] == [
+        result.status for result in dry_report.results
+    ]
+    for name in ("a.mp4", "b.mp4", "c.mp4"):
+        assert (tmp_path / name).read_bytes() == b"abc"
+    assert not list(tmp_path.glob("__ren_tmp_*"))
+
+
 def test_apply_validation_error_does_not_stop_other_rows(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"abc")
     report = apply_service(tmp_path).apply_rows([
         row("missing.mp4", "x.mp4"),
+        row("a.mp4", "b.mp4"),
+    ], dry_run=False)
+
+    assert [result.status for result in report.results] == ["error", "renamed"]
+    assert report.had_errors is True
+    assert (tmp_path / "b.mp4").read_bytes() == b"abc"
+
+
+def test_apply_embedded_nul_does_not_stop_other_rows(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+    report = apply_service(tmp_path).apply_rows([
+        row("bad\0.mp4", "x.mp4"),
         row("a.mp4", "b.mp4"),
     ], dry_run=False)
 
