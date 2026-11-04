@@ -67,7 +67,8 @@ def test_oshash_known_vectors(tmp_path):
     p.write_bytes(b"hello world")
     assert oshash_from_path(p) == "d3e392dee38cd4df"
 
-    p.write_bytes(b"this is a test" * 15)
+    # Go makeByteArray(base, 15) doubles the buffer 15 times.
+    p.write_bytes(b"this is a test" * (2 ** 15))
     assert oshash_from_path(p) == "6a0eba04654d0b9b"
 
 def test_oshash_rejects_tiny_file(tmp_path):
