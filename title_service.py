@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Сервисный слой предпросмотра переименования видео.
+"""Сервисный слой предпросмотра и применения переименований видео.
 
 `TitleService.preview()` обходит видеофайлы, считает OSHASH, ищет сцены в
-StashDB (с кэшем) и строит `PreviewRow` для каждого файла. Сервис ничего не
-печатает, не пишет CSV и не запускает subprocess — это задача CLI/TUI.
+StashDB (с кэшем) и строит `PreviewRow` для каждого файла.
+`TitleService.apply_rows()` проверяет одобренные строки и выполняет двухфазное
+переименование. Сервис ничего не печатает, не пишет CSV и не запускает
+subprocess — это задача CLI/TUI.
 
 Порядок обработки:
 
@@ -19,9 +21,12 @@ StashDB (с кэшем) и строит `PreviewRow` для каждого фа�
 
 Зависимостей нет — только стандартная библиотека.
 """
+import ntpath
 import os
+import stat
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
+from uuid import uuid4
 
 from clean_ph_names import _cap_length
 from oshash import OshashError, oshash_from_path
@@ -37,6 +42,8 @@ from title_matcher import (
 )
 
 __all__ = [
+    "ApplyReport",
+    "ApplyResult",
     "PreviewRow",
     "PreviewReport",
     "ProgressEvent",
@@ -74,6 +81,24 @@ class PreviewReport:
     rows: tuple[PreviewRow, ...]
     warnings: tuple[str, ...]
     had_transient_errors: bool
+
+
+@dataclass(frozen=True)
+class ApplyResult:
+    """Результат применения одной строки предпросмотра."""
+
+    old_rel: str
+    new_rel: str
+    status: str
+    message: str
+
+
+@dataclass(frozen=True)
+class ApplyReport:
+    """Результаты apply в исходном порядке и общий признак ошибок."""
+
+    results: tuple[ApplyResult, ...]
+    had_errors: bool
 
 
 @dataclass(frozen=True)
@@ -122,6 +147,19 @@ class _Planned:
     note: str
 
 
+@dataclass
+class _ApplyItem:
+    """Проверенная строка apply и её состояние при двухфазном rename."""
+
+    index: int
+    row: PreviewRow
+    old_path: str
+    new_path: str
+    new_rel: str
+    temp_path: str | None = None
+    renamed: bool = False
+
+
 def _extension(name: str) -> str:
     """Расширение файла в нижнем регистре."""
     return os.path.splitext(name)[1].lower()
@@ -137,6 +175,22 @@ def _inside_root(path: str, root_real: str) -> bool:
     except ValueError:
         return False
     return common == os.path.normcase(root_real)
+
+
+def _path_key(path: str) -> str:
+    """Ключ пути для сравнения целей и источников на текущей ОС."""
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _abspath_inside_root(path: str, root: str) -> bool:
+    """Проверка containment без разрешения symlink (после `abspath`)."""
+    try:
+        common = os.path.commonpath(
+            [os.path.normcase(path), os.path.normcase(root)]
+        )
+    except ValueError:
+        return False
+    return common == os.path.normcase(root)
 
 
 def _walk(directory: str, recursive: bool, root_real: str) -> Iterator[str]:
@@ -215,7 +269,7 @@ def _collision_name(stem: str, suffix: str, number: int) -> str:
 
 
 class TitleService:
-    """Preview без побочных эффектов: файлы только читаются.
+    """TUI-ready сервис preview и collision-safe apply.
 
     `refresh` игнорирует кэш, но не отключает сеть; `offline` наоборот
     запрещает сеть и читает только кэш (даже при `refresh=True`).
@@ -291,6 +345,286 @@ class TitleService:
             rows=tuple(rows),
             warnings=tuple(warnings),
             had_transient_errors=had_transient,
+        )
+
+    # --- apply -----------------------------------------------------------
+
+    def apply_rows(
+        self,
+        rows: Sequence[PreviewRow],
+        *,
+        dry_run: bool = True,
+        force: bool = False,
+        suffix_collisions: bool = False,
+    ) -> ApplyReport:
+        """Проверяет и двухфазно переименовывает одобренные строки.
+
+        Неодобренные строки пропускаются до обращения к файловой системе.
+        В dry-run выполняются те же проверки и разрешение коллизий, но ни один
+        `os.rename` не вызывается.
+        """
+        results: list[ApplyResult | None] = []
+        approved: list[tuple[int, PreviewRow]] = []
+        for index, row in enumerate(rows):
+            if row.approved:
+                results.append(None)
+                approved.append((index, row))
+            else:
+                results.append(ApplyResult(
+                    row.old_rel, row.new_rel, "skipped", "not approved"
+                ))
+
+        root_real = os.path.realpath(self._root)
+        items: list[_ApplyItem] = []
+        for index, row in approved:
+            item, error = self._prepare_apply_item(
+                index, row, root_real, force
+            )
+            if error:
+                results[index] = ApplyResult(
+                    row.old_rel, row.new_rel, "error", error
+                )
+            elif item is not None:
+                items.append(item)
+
+        moving = {_path_key(item.old_path) for item in items}
+        claimed: set[str] = set()
+        ready: list[_ApplyItem] = []
+        for item in items:
+            error = self._resolve_apply_target(
+                item, moving, claimed, suffix_collisions
+            )
+            if error:
+                results[item.index] = ApplyResult(
+                    item.row.old_rel, item.row.new_rel, "error", error
+                )
+            else:
+                ready.append(item)
+
+        if dry_run:
+            for item in ready:
+                results[item.index] = ApplyResult(
+                    item.row.old_rel, item.new_rel, "renamed", "dry-run"
+                )
+            return self._apply_report(results)
+
+        active: list[_ApplyItem] = []
+        for item in ready:
+            temp_path = self._new_apply_temp_path(item.old_path)
+            try:
+                os.rename(item.old_path, temp_path)
+            except OSError as exc:
+                message = str(exc) or exc.__class__.__name__
+                results[item.index] = ApplyResult(
+                    item.row.old_rel, item.new_rel, "error",
+                    f"temporary rename failed: {message}",
+                )
+            else:
+                item.temp_path = temp_path
+                active.append(item)
+
+        for item in active:
+            error = ""
+            if os.path.lexists(item.new_path):
+                error = "target became occupied during rename"
+            else:
+                try:
+                    os.rename(item.temp_path, item.new_path)
+                except OSError as exc:
+                    message = str(exc) or exc.__class__.__name__
+                    error = f"final rename failed: {message}"
+                else:
+                    item.temp_path = None
+                    item.renamed = True
+                    results[item.index] = ApplyResult(
+                        item.row.old_rel, item.new_rel, "renamed", ""
+                    )
+                    continue
+
+            rollback_errors = self._rollback_apply_item(
+                item, active, results, frozenset()
+            )
+            if rollback_errors:
+                error += "; rollback failed: " + "; ".join(rollback_errors)
+            results[item.index] = ApplyResult(
+                item.row.old_rel, item.new_rel, "error", error
+            )
+
+        return self._apply_report(results)
+
+    def _prepare_apply_item(
+        self,
+        index: int,
+        row: PreviewRow,
+        root_real: str,
+        force: bool,
+    ) -> tuple[_ApplyItem | None, str]:
+        """Выполняет все проверки строки, кроме занятости цели."""
+        old_rel = row.old_rel
+        new_rel = row.new_rel
+        for label, value in (("old", old_rel), ("new", new_rel)):
+            if (not value or os.path.isabs(value) or ntpath.isabs(value)
+                    or os.path.splitdrive(value)[0]
+                    or ntpath.splitdrive(value)[0]):
+                return None, f"{label} path must be relative"
+
+        old_path = os.path.abspath(os.path.join(self._root, old_rel))
+        new_path = os.path.abspath(os.path.join(self._root, new_rel))
+        if (not _abspath_inside_root(old_path, self._root)
+                or not _abspath_inside_root(new_path, self._root)
+                or not _inside_root(old_path, root_real)
+                or not _inside_root(new_path, root_real)):
+            return None, "path escapes root"
+        if (os.path.dirname(new_rel) or ntpath.dirname(new_rel)
+                or "/" in new_rel or "\\" in new_rel):
+            return None, "new path must not contain subdirectories"
+
+        new_stem = os.path.splitext(new_rel)[0]
+        if len(new_rel) > _MAX_FULL_NAME:
+            return None, "new name exceeds 255 characters"
+        if not is_valid_final_stem(new_stem):
+            return None, "invalid new name"
+        if _extension(old_rel) != _extension(new_rel):
+            return None, "old and new extensions differ"
+
+        try:
+            if os.path.islink(old_path) or os.path.isjunction(old_path):
+                return None, "old path must not be a symlink or junction"
+            source_stat = os.lstat(old_path)
+        except OSError as exc:
+            message = str(exc) or exc.__class__.__name__
+            return None, f"cannot stat old path: {message}"
+        if not stat.S_ISREG(source_stat.st_mode):
+            return None, "old path is not a regular file"
+
+        if not force:
+            if source_stat.st_size != row.size:
+                return None, (
+                    f"stale size: expected {row.size}, "
+                    f"actual {source_stat.st_size}"
+                )
+            try:
+                digest = self._oshash_func(old_path)
+            except (OSError, OshashError) as exc:
+                message = str(exc) or exc.__class__.__name__
+                return None, f"cannot hash old path: {message}"
+            if digest != row.oshash:
+                return None, "stale oshash"
+
+        return _ApplyItem(
+            index=index,
+            row=row,
+            old_path=old_path,
+            new_path=new_path,
+            new_rel=new_rel,
+        ), ""
+
+    def _resolve_apply_target(
+        self,
+        item: _ApplyItem,
+        moving: set[str],
+        claimed: set[str],
+        suffix_collisions: bool,
+    ) -> str:
+        """Проверяет цель или явно добавляет суффикс коллизии."""
+        original_stem, suffix = os.path.splitext(item.new_rel)
+        number = 1
+        while True:
+            candidate_rel = item.new_rel if number == 1 else _collision_name(
+                original_stem, suffix, number
+            )
+            candidate_path = os.path.abspath(
+                os.path.join(self._root, candidate_rel)
+            )
+            key = _path_key(candidate_path)
+            occupied = key in claimed or (
+                os.path.lexists(candidate_path) and key not in moving
+            )
+            if not occupied:
+                item.new_rel = candidate_rel
+                item.new_path = candidate_path
+                claimed.add(key)
+                return ""
+            if not suffix_collisions:
+                return "target is occupied"
+            number += 1
+
+    @staticmethod
+    def _new_apply_temp_path(old_path: str) -> str:
+        """Уникальное временное имя в той же папке, что и источник."""
+        directory = os.path.dirname(old_path)
+        while True:
+            candidate = os.path.join(directory, _TMP_PREFIX + uuid4().hex)
+            if not os.path.lexists(candidate):
+                return candidate
+
+    def _rollback_apply_item(
+        self,
+        item: _ApplyItem,
+        active: Sequence[_ApplyItem],
+        results: list[ApplyResult | None],
+        visiting: frozenset[int],
+    ) -> list[str]:
+        """Возвращает файл на old, при необходимости откатывая цепочку."""
+        if item.index in visiting:
+            return [f"{item.row.old_rel}: rollback cycle detected"]
+        source = item.temp_path
+        if source is None and item.renamed:
+            source = item.new_path
+        if source is None:
+            return [f"{item.row.old_rel}: no renamed file to restore"]
+
+        if item.renamed and _path_key(source) == _path_key(item.old_path):
+            item.renamed = False
+            results[item.index] = ApplyResult(
+                item.row.old_rel, item.new_rel, "error",
+                "rolled back because another rename failed",
+            )
+            return []
+
+        errors: list[str] = []
+        if os.path.lexists(item.old_path):
+            occupant = next((
+                other for other in active
+                if other.index != item.index
+                and other.renamed
+                and _path_key(other.new_path) == _path_key(item.old_path)
+            ), None)
+            if occupant is not None:
+                errors.extend(self._rollback_apply_item(
+                    occupant, active, results, visiting | {item.index}
+                ))
+            if os.path.lexists(item.old_path):
+                errors.append(f"{item.row.old_rel}: original path is occupied")
+                return errors
+
+        try:
+            os.rename(source, item.old_path)
+        except OSError as exc:
+            message = str(exc) or exc.__class__.__name__
+            errors.append(f"{item.row.old_rel}: {message}")
+        else:
+            was_renamed = item.renamed
+            item.temp_path = None
+            item.renamed = False
+            if was_renamed:
+                results[item.index] = ApplyResult(
+                    item.row.old_rel, item.new_rel, "error",
+                    "rolled back because another rename failed",
+                )
+        return errors
+
+    @staticmethod
+    def _apply_report(results: Sequence[ApplyResult | None]) -> ApplyReport:
+        """Собирает неизменяемый отчёт и проверяет полноту результатов."""
+        final: list[ApplyResult] = []
+        for result in results:
+            if result is None:
+                raise RuntimeError("missing apply result")
+            final.append(result)
+        return ApplyReport(
+            results=tuple(final),
+            had_errors=any(result.status == "error" for result in final),
         )
 
     def _collect(

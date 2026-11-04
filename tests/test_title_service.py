@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+import title_service
+
 from stashdb_client import (
     Performer,
     Scene,
@@ -12,7 +14,12 @@ from stashdb_client import (
     Studio,
 )
 from title_matcher import normalize_for_match, parse_local_name
-from title_service import ProgressEvent, TitleService, iter_video_files
+from title_service import (
+    PreviewRow,
+    ProgressEvent,
+    TitleService,
+    iter_video_files,
+)
 
 
 def scene(title="Poking Glory", studio="BrazzersExxtra", date="2026-10-03",
@@ -521,3 +528,247 @@ def test_nested_paths_keep_their_relative_directory(tmp_path):
         "sub", "a 26.10.03 ryan reid poking glory.mp4")
     assert row.new_rel == os.path.join(
         "sub", "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory.mp4")
+
+
+# --- apply ------------------------------------------------------------------
+
+
+def row(old, new, approved=True, oshash="h", size=3):
+    return PreviewRow(approved, old, new, "fingerprint", 1.0, "s", "",
+                      oshash, size)
+
+
+def apply_service(tmp_path, hasher=None):
+    return TitleService(str(tmp_path), {}, None, None,
+                        oshash_func=hasher or (lambda path: "h"))
+
+
+def test_apply_renames_approved_and_skips_rest(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+    service = TitleService(str(tmp_path), {}, None, None,
+                           oshash_func=lambda p: "h")
+    report = service.apply_rows(
+        [row("a.mp4", "b.mp4"), row("a.mp4", "c.mp4", approved=False)],
+        dry_run=False)
+    assert (tmp_path / "b.mp4").exists()
+    assert report.results[1].status == "skipped"
+
+
+def test_apply_rejects_path_traversal(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+    service = TitleService(str(tmp_path), {}, None, None,
+                           oshash_func=lambda p: "h")
+    report = service.apply_rows([row("a.mp4", "..\\evil.mp4")], dry_run=False)
+    assert report.had_errors is True
+    assert not (tmp_path.parent / "evil.mp4").exists()
+
+
+def test_apply_handles_rename_chain_and_upper_extension(tmp_path):
+    (tmp_path / "a.MP4").write_bytes(b"abc")
+    (tmp_path / "b.MP4").write_bytes(b"abc")
+    service = TitleService(str(tmp_path), {}, None, None,
+                           oshash_func=lambda p: "h")
+    report = service.apply_rows(
+        [row("a.MP4", "b.MP4"), row("b.MP4", "c.MP4")], dry_run=False)
+    assert report.had_errors is False
+    assert (tmp_path / "b.MP4").exists() and (tmp_path / "c.MP4").exists()
+
+
+def test_apply_rejects_reserved_name(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+    service = TitleService(str(tmp_path), {}, None, None,
+                           oshash_func=lambda p: "h")
+    report = service.apply_rows([row("a.mp4", "CON.mp4")], dry_run=False)
+    assert report.had_errors is True
+
+
+def test_apply_skips_unapproved_before_any_validation(tmp_path):
+    def unexpected_hash(path):
+        raise AssertionError("unapproved rows must not be hashed")
+
+    report = apply_service(tmp_path, unexpected_hash).apply_rows([
+        row(str(tmp_path / "missing.mp4"), "..\\evil.mp4", approved=False),
+    ], dry_run=False)
+
+    assert report.had_errors is False
+    assert report.results[0].status == "skipped"
+
+
+def test_apply_rejects_absolute_paths_old_traversal_and_new_subdirs(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "a.mp4").write_bytes(b"abc")
+    outside = tmp_path / "outside.mp4"
+    outside.write_bytes(b"abc")
+    service = apply_service(root)
+
+    report = service.apply_rows([
+        row("../outside.mp4", "renamed.mp4"),
+        row(str(outside), "other.mp4"),
+        row("a.mp4", str(tmp_path / "absolute.mp4")),
+        row("a.mp4", "sub/new.mp4"),
+    ], dry_run=False)
+
+    assert [result.status for result in report.results] == ["error"] * 4
+    assert outside.read_bytes() == b"abc"
+    assert (root / "a.mp4").read_bytes() == b"abc"
+
+
+def test_apply_rejects_non_regular_old_file(tmp_path):
+    (tmp_path / "folder.mp4").mkdir()
+    report = apply_service(tmp_path).apply_rows(
+        [row("folder.mp4", "new.mp4")], dry_run=False)
+    assert report.results[0].status == "error"
+    assert (tmp_path / "folder.mp4").is_dir()
+
+
+def test_apply_rejects_symlinked_old_file(tmp_path):
+    real = tmp_path / "real.mp4"
+    real.write_bytes(b"abc")
+    link = tmp_path / "alias.mp4"
+    try:
+        link.symlink_to(real)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available")
+
+    report = apply_service(tmp_path).apply_rows(
+        [row("alias.mp4", "new.mp4")], dry_run=False)
+
+    assert report.results[0].status == "error"
+    assert real.read_bytes() == b"abc"
+    assert not (tmp_path / "new.mp4").exists()
+
+
+def test_apply_rejects_extension_mismatch_and_overlong_name(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+    report = apply_service(tmp_path).apply_rows([
+        row("a.mp4", "new.mkv"),
+        row("a.mp4", "x" * 252 + ".mp4"),
+    ], dry_run=False)
+
+    assert [result.status for result in report.results] == ["error", "error"]
+    assert (tmp_path / "a.mp4").exists()
+
+
+def test_apply_rejects_stale_size_and_oshash(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+    (tmp_path / "b.mp4").write_bytes(b"abc")
+    report = apply_service(tmp_path).apply_rows([
+        row("a.mp4", "a-new.mp4", size=4),
+        row("b.mp4", "b-new.mp4", oshash="stale"),
+    ], dry_run=False)
+
+    assert [result.status for result in report.results] == ["error", "error"]
+    assert (tmp_path / "a.mp4").exists()
+    assert (tmp_path / "b.mp4").exists()
+
+
+def test_apply_force_bypasses_size_and_hash_checks(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+
+    def unexpected_hash(path):
+        raise AssertionError("force must not hash the source")
+
+    report = apply_service(tmp_path, unexpected_hash).apply_rows(
+        [row("a.mp4", "b.mp4", oshash="stale", size=999)],
+        dry_run=False, force=True)
+
+    assert report.had_errors is False
+    assert report.results[0].status == "renamed"
+    assert (tmp_path / "b.mp4").read_bytes() == b"abc"
+
+
+def test_apply_occupied_target_errors_without_overwriting(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+    (tmp_path / "b.mp4").write_bytes(b"old")
+    report = apply_service(tmp_path).apply_rows(
+        [row("a.mp4", "b.mp4")], dry_run=False)
+
+    assert report.results[0].status == "error"
+    assert (tmp_path / "a.mp4").read_bytes() == b"abc"
+    assert (tmp_path / "b.mp4").read_bytes() == b"old"
+
+
+def test_apply_suffix_collisions_uses_numeric_suffix(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+    (tmp_path / "b.mp4").write_bytes(b"old")
+    report = apply_service(tmp_path).apply_rows(
+        [row("a.mp4", "b.mp4")], dry_run=False, suffix_collisions=True)
+
+    assert report.had_errors is False
+    assert report.results[0].new_rel == "b (2).mp4"
+    assert (tmp_path / "b.mp4").read_bytes() == b"old"
+    assert (tmp_path / "b (2).mp4").read_bytes() == b"abc"
+
+
+def test_apply_dry_run_validates_without_changing_files(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+    report = apply_service(tmp_path).apply_rows([row("a.mp4", "b.mp4")])
+
+    assert report.had_errors is False
+    assert report.results[0].status == "renamed"
+    assert isinstance(report.results, tuple)
+    assert (tmp_path / "a.mp4").read_bytes() == b"abc"
+    assert not (tmp_path / "b.mp4").exists()
+    assert not list(tmp_path.glob("__ren_tmp_*"))
+    with pytest.raises(Exception):
+        report.had_errors = True
+
+
+def test_apply_validation_error_does_not_stop_other_rows(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+    report = apply_service(tmp_path).apply_rows([
+        row("missing.mp4", "x.mp4"),
+        row("a.mp4", "b.mp4"),
+    ], dry_run=False)
+
+    assert [result.status for result in report.results] == ["error", "renamed"]
+    assert report.had_errors is True
+    assert (tmp_path / "b.mp4").read_bytes() == b"abc"
+
+
+def test_apply_rename_failure_rolls_back_only_failed_row(tmp_path, monkeypatch):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+    (tmp_path / "c.mp4").write_bytes(b"def")
+    real_rename = os.rename
+
+    def fail_second_target(src, dst):
+        if (os.path.basename(src).startswith("__ren_tmp_")
+                and os.path.basename(dst) == "d.mp4"):
+            raise OSError("injected rename failure")
+        real_rename(src, dst)
+
+    monkeypatch.setattr(title_service.os, "rename", fail_second_target)
+    report = apply_service(tmp_path).apply_rows([
+        row("a.mp4", "b.mp4"),
+        row("c.mp4", "d.mp4"),
+    ], dry_run=False)
+
+    assert [result.status for result in report.results] == ["renamed", "error"]
+    assert (tmp_path / "b.mp4").read_bytes() == b"abc"
+    assert (tmp_path / "c.mp4").read_bytes() == b"def"
+    assert not list(tmp_path.glob("__ren_tmp_*"))
+
+
+def test_apply_chain_failure_restores_original_paths(tmp_path, monkeypatch):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+    (tmp_path / "b.mp4").write_bytes(b"def")
+    real_rename = os.rename
+
+    def fail_last_target(src, dst):
+        if (os.path.basename(src).startswith("__ren_tmp_")
+                and os.path.basename(dst) == "c.mp4"):
+            raise OSError("injected rename failure")
+        real_rename(src, dst)
+
+    monkeypatch.setattr(title_service.os, "rename", fail_last_target)
+    report = apply_service(tmp_path).apply_rows([
+        row("a.mp4", "b.mp4"),
+        row("b.mp4", "c.mp4"),
+    ], dry_run=False)
+
+    assert report.had_errors is True
+    assert (tmp_path / "a.mp4").read_bytes() == b"abc"
+    assert (tmp_path / "b.mp4").read_bytes() == b"def"
+    assert not (tmp_path / "c.mp4").exists()
+    assert not list(tmp_path.glob("__ren_tmp_*"))
