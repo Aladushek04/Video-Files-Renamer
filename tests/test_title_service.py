@@ -701,6 +701,17 @@ def test_apply_suffix_collisions_uses_numeric_suffix(tmp_path):
     assert (tmp_path / "b (2).mp4").read_bytes() == b"abc"
 
 
+def test_apply_dry_run_reports_actual_suffix_target(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+    (tmp_path / "b.mp4").write_bytes(b"old")
+    report = apply_service(tmp_path).apply_rows(
+        [row("a.mp4", "b.mp4")], suffix_collisions=True)
+
+    assert report.results[0].status == "renamed"
+    assert report.results[0].new_rel == "b (2).mp4"
+    assert not (tmp_path / "b (2).mp4").exists()
+
+
 def test_apply_dry_run_validates_without_changing_files(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"abc")
     report = apply_service(tmp_path).apply_rows([row("a.mp4", "b.mp4")])

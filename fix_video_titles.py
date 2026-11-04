@@ -45,7 +45,7 @@ CSV_FIELDS = (
     "approved", "old", "new", "source", "confidence",
     "scene_id", "note", "oshash", "size",
 )
-LOG_FIELDS = ("timestamp", "old", "new")
+LOG_FIELDS = ("timestamp", "old", "new", "oshash", "scene_id", "source")
 _APPROVED_VALUES = frozenset({"y", "yes", "1", "true"})
 _FORMULA_PREFIXES = ("=", "+", "-", "@")
 
@@ -153,18 +153,23 @@ def read_preview_csv(path: str) -> list[PreviewRow]:
 
 def append_rename_log(
     path: str,
+    rows: Sequence[PreviewRow],
     results: Sequence[ApplyResult],
     timestamp: str,
 ) -> None:
     """Дописывает в лог только фактически переименованные строки.
 
-    Заголовок пишется один раз; BOM добавляется только в новый файл, чтобы
-    при дописывании он не попадал в середину.
+    Строка лога: `timestamp;old;new;oshash;scene_id;source`, где `new` —
+    фактическое имя из `ApplyResult` (с суффиксом коллизии, если он был
+    добавлен), а `oshash`/`scene_id`/`source` берутся из `PreviewRow`,
+    найденной по `old_rel`. Заголовок пишется один раз; BOM добавляется
+    только в новый файл, чтобы при дописывании он не попадал в середину.
     """
     renamed = [result for result in results if result.status == "renamed"]
     if not renamed:
         return
 
+    by_old = {row.old_rel: row for row in rows}
     _ensure_parent(path)
     exists = os.path.isfile(path) and os.path.getsize(path) > 0
     mode = "a" if exists else "w"
@@ -174,10 +179,14 @@ def append_rename_log(
         if not exists:
             writer.writerow(LOG_FIELDS)
         for result in renamed:
+            row = by_old.get(result.old_rel)
             writer.writerow((
                 timestamp,
                 _guard_formula(result.old_rel),
                 _guard_formula(result.new_rel),
+                row.oshash if row is not None else "",
+                row.scene_id if row is not None else "",
+                row.source if row is not None else "",
             ))
 
 
@@ -365,7 +374,7 @@ def _run_apply(args: argparse.Namespace,
 
     if args.apply and renamed:
         try:
-            append_rename_log(args.log, report.results, _timestamp())
+            append_rename_log(args.log, rows, report.results, _timestamp())
         except OSError as exc:
             print(
                 f"error: cannot write rename log {args.log}: {exc}",

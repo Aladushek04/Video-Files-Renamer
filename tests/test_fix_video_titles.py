@@ -217,11 +217,35 @@ def test_apply_renames_only_approved_and_logs_renames(tmp_path, capsys):
     assert not (tmp_path / "old.mp4").exists()
     assert (tmp_path / "keep.mp4").exists()
     log = (tmp_path / "rename_log.csv").read_text(encoding="utf-8-sig")
-    assert log.splitlines()[0] == "timestamp;old;new"
+    assert log.splitlines()[0] == "timestamp;old;new;oshash;scene_id;source"
     assert "new.mp4" in log
     assert "keep.mp4" not in log
     assert len(log.strip().splitlines()) == 2
+    assert approved.oshash in log
+    assert "scene-1" in log
+    assert "fingerprint" in log
     assert "new.mp4" in capsys.readouterr().out
+
+
+def test_apply_suffix_collisions_logs_actual_target(tmp_path, capsys):
+    row = _row(tmp_path, new="new.mp4")
+    (tmp_path / "new.mp4").write_bytes(b"occupied!!")
+    csv_path = tmp_path / "preview.csv"
+    write_preview_csv(str(csv_path), [row])
+
+    code = main(["apply", str(csv_path), "--root", str(tmp_path),
+                 "--log", str(tmp_path / "rename_log.csv"), "--apply",
+                 "--suffix-collisions"])
+
+    assert code == 0
+    assert (tmp_path / "new (2).mp4").exists()
+    assert "new (2).mp4" in capsys.readouterr().out
+    log = (tmp_path / "rename_log.csv").read_text(encoding="utf-8-sig")
+    fields = log.strip().splitlines()[1].split(";")
+    assert fields[1:] == [
+        "old.mp4", "new (2).mp4", row.oshash, "scene-1", "fingerprint",
+    ]
+
 
 
 def test_apply_row_error_exits_1(tmp_path, capsys):
@@ -247,22 +271,53 @@ def test_apply_missing_csv_exits_2(tmp_path, capsys):
 
 def test_append_rename_log_only_renamed_and_header_once(tmp_path):
     log = tmp_path / "rename_log.csv"
+    rows = [
+        PreviewRow(True, "a.mp4", "b.mp4", "fingerprint", 1.0,
+                   "scene-a", "", "hash-a", 10),
+        PreviewRow(False, "c.mp4", "d.mp4", "text", 0.5,
+                   "scene-c", "", "hash-c", 20),
+        PreviewRow(True, "e.mp4", "f.mp4", "heuristic", 0.0,
+                   "", "", "hash-e", 30),
+    ]
     results = [
         ApplyResult("a.mp4", "b.mp4", "renamed", ""),
         ApplyResult("c.mp4", "d.mp4", "skipped", "not approved"),
         ApplyResult("e.mp4", "f.mp4", "error", "target is occupied"),
     ]
-    append_rename_log(str(log), results, "2026-11-04T12:00:00Z")
+    append_rename_log(str(log), rows, results, "2026-11-04T12:00:00Z")
     append_rename_log(
-        str(log), [ApplyResult("g.mp4", "h.mp4", "renamed", "")],
+        str(log),
+        [PreviewRow(True, "g.mp4", "h.mp4", "text", 0.9,
+                    "scene-g", "", "hash-g", 40)],
+        [ApplyResult("g.mp4", "h.mp4", "renamed", "")],
         "2026-11-04T12:01:00Z",
     )
 
     text = log.read_text(encoding="utf-8-sig")
     lines = text.strip().splitlines()
-    assert lines[0] == "timestamp;old;new"
+    assert lines[0] == "timestamp;old;new;oshash;scene_id;source"
     assert len(lines) == 3
-    assert "a.mp4;b.mp4" in lines[1]
-    assert "g.mp4;h.mp4" in lines[2]
+    assert lines[1] == (
+        "2026-11-04T12:00:00Z;a.mp4;b.mp4;hash-a;scene-a;fingerprint"
+    )
+    assert lines[2] == (
+        "2026-11-04T12:01:00Z;g.mp4;h.mp4;hash-g;scene-g;text"
+    )
     assert "c.mp4" not in text
     assert "e.mp4" not in text
+
+
+def test_append_rename_log_writes_all_six_fields(tmp_path):
+    log = tmp_path / "rename_log.csv"
+    rows = [PreviewRow(True, "old.mp4", "new.mp4", "fingerprint", 1.0,
+                       "scene-42", "note", "deadbeef", 123)]
+    results = [ApplyResult("old.mp4", "new.mp4", "renamed", "")]
+
+    append_rename_log(str(log), rows, results, "2026-11-04T12:00:00Z")
+
+    fields = log.read_text(encoding="utf-8-sig").splitlines()[1].split(";")
+    assert fields == [
+        "2026-11-04T12:00:00Z", "old.mp4", "new.mp4",
+        "deadbeef", "scene-42", "fingerprint",
+    ]
+
