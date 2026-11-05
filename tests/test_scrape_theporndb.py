@@ -1,14 +1,14 @@
 """Тесты ThePornDB: список студий через findStudio по именам."""
 import json
 
-from scrape_theporndb_studios import (
+from video_renamer.scrapers.theporndb import (
     build_lookup_query,
     load_seed_names,
     main,
     parse_lookup_response,
     run_lookup,
 )
-from stashdb_client import Studio
+from video_renamer.core.stashdb_client import Studio
 
 
 class FakeClient:
@@ -67,7 +67,7 @@ def test_load_seed_names_from_dict_and_list(tmp_path):
 
 
 def test_main_apply_writes_values_through_find_studio(tmp_path, monkeypatch):
-    import scrape_theporndb_studios as module
+    from video_renamer.scrapers import theporndb as module
 
     seed = tmp_path / "seed.json"
     seed.write_text(json.dumps({"brazzers": "Brazzers"}), encoding="utf-8")

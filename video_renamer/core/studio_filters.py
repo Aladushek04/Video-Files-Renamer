@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from clean_ph_names import normalize_studio_key
+from video_renamer.core.clean_ph_names import normalize_studio_key
 
 _PLACEHOLDER_NAMES = frozenset(
     {"unknown", "n/a", "na", "none", "null", "test", "untitled", "no name"}

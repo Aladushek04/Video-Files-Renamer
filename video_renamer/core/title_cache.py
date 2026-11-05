@@ -27,7 +27,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from stashdb_client import Scene
+from video_renamer.core.stashdb_client import Scene
 
 __all__ = ["CACHE_TTL_DAYS", "TitleCache", "utcnow"]
 

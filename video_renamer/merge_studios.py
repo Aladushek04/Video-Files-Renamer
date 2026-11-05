@@ -12,7 +12,7 @@ import os
 import sys
 from collections.abc import Sequence
 
-from scrape_studios import (
+from video_renamer.scrapers.stashdb import (
     _atomic_write_json,
     _backup_studios,
     _collisions_path,
@@ -88,12 +88,12 @@ def merge_studio_files(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="merge_studios_files.py",
+        prog="python -m video_renamer.merge_studios",
         description="Merge studio JSON dictionaries, first value wins.",
     )
     parser.add_argument("inputs", nargs="+", help="studio JSON files to merge")
-    parser.add_argument("--out", default="studios.json",
-                        help="output JSON (default: studios.json)")
+    parser.add_argument("--out", default="data/studios.json",
+                        help="output JSON (default: data/studios.json)")
     parser.add_argument("--apply", action="store_true",
                         help="write output and collision report")
     return parser

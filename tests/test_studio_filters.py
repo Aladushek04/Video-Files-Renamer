@@ -1,5 +1,5 @@
 """Тесты фильтра мусорных имён студий из больших stash-box источников."""
-from studio_filters import filter_studio_names, is_useful_studio_name
+from video_renamer.core.studio_filters import filter_studio_names, is_useful_studio_name
 
 
 def test_keeps_real_studio_names():

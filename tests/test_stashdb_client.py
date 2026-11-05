@@ -4,7 +4,7 @@ import urllib.error
 
 import pytest
 
-from stashdb_client import (
+from video_renamer.core.stashdb_client import (
     Performer,
     Scene,
     StashDBAuthError,

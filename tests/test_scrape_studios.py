@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-import scrape_studios
-from scrape_studios import (
+from video_renamer.scrapers import stashdb as scrape_studios
+from video_renamer.scrapers.stashdb import (
     Checkpoint,
     FANSDB_SOURCE,
     THEPORNDB_SOURCE,
@@ -18,7 +18,7 @@ from scrape_studios import (
     save_checkpoint,
     save_raw,
 )
-from stashdb_client import (
+from video_renamer.core.stashdb_client import (
     StashDBAuthError,
     StashDBTransientError,
     Studio,
@@ -293,15 +293,15 @@ def test_main_no_filter_keeps_generated_names(tmp_path, monkeypatch):
 
 def test_fansdb_source_parser_defaults():
     args = scrape_studios._build_parser(FANSDB_SOURCE).parse_args([])
-    assert args.out == "studios_fansdb.json"
-    assert args.checkpoint == "studios_fansdb_checkpoint.json"
-    assert args.raw == "studios_fansdb_raw.json"
+    assert args.out == "data/studios_fansdb.json"
+    assert args.checkpoint == "data/studios_fansdb_checkpoint.json"
+    assert args.raw == "data/studios_fansdb_raw.json"
 
 
 def test_theporndb_source_constants():
     assert THEPORNDB_SOURCE.endpoint == "https://theporndb.net/graphql"
     assert THEPORNDB_SOURCE.api_key_env == "THE_PORNDB_API_KEY"
-    assert THEPORNDB_SOURCE.default_out == "studios_theporndb.json"
+    assert THEPORNDB_SOURCE.default_out == "data/studios_theporndb.json"
 
 
 def test_main_uses_source_endpoint_and_key(tmp_path, monkeypatch):

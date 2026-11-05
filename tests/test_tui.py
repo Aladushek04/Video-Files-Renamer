@@ -5,8 +5,8 @@ import pytest
 
 pytest.importorskip("textual")
 
-from title_service import PreviewReport, PreviewRow  # noqa: E402
-from tui import RenamerApp  # noqa: E402
+from video_renamer.core.title_service import PreviewReport, PreviewRow  # noqa: E402
+from video_renamer.tui import RenamerApp  # noqa: E402
 
 ROWS = (
     PreviewRow(
@@ -49,7 +49,7 @@ def test_app_previews_and_toggles_rows(tmp_path):
 
 
 def test_app_apply_modal_runs_fake_apply(tmp_path):
-    from title_service import ApplyReport
+    from video_renamer.core.title_service import ApplyReport
 
     async def run() -> None:
         app = RenamerApp(

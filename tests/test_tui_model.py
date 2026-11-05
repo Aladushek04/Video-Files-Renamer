@@ -1,6 +1,6 @@
 """Тесты модели TUI без зависимости от Textual."""
-from tui_model import ReviewModel
-from title_service import PreviewRow
+from video_renamer.tui_model import ReviewModel
+from video_renamer.core.title_service import PreviewRow
 
 
 def row(source="text", approved=False, old="old.mp4", new="new.mp4"):

@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Iterable
 
-from title_service import PreviewRow
+from video_renamer.core.title_service import PreviewRow
 
 FILTERS: tuple[tuple[str, str], ...] = (
     ("all", "Все"),

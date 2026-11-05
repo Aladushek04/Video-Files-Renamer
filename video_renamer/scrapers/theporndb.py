@@ -20,8 +20,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from env_file import load_env_file
-from scrape_studios import (
+from video_renamer.core.env_file import load_env_file
+from video_renamer.scrapers.stashdb import (
     THEPORNDB_SOURCE,
     _atomic_write_json,
     _backup_studios,
@@ -32,14 +32,14 @@ from scrape_studios import (
     merge_studios,
     save_raw,
 )
-from stashdb_client import (
+from video_renamer.core.stashdb_client import (
     StashDBAuthError,
     StashDBClient,
     StashDBError,
     StashDBTransientError,
     Studio,
 )
-from studio_filters import filter_studio_names
+from video_renamer.core.studio_filters import filter_studio_names
 
 __all__ = [
     "LookupCheckpoint",
@@ -247,7 +247,7 @@ def _non_negative_float(value: str) -> float:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="scrape_theporndb_studios.py",
+        prog="python -m video_renamer.scrapers.theporndb",
         description=(
             "Enrich known studio names via ThePornDB findStudio "
             "(ThePornDB has no queryStudios)."

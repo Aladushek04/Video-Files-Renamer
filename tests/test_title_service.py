@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-import title_service
+from video_renamer.core import title_service
 
-from stashdb_client import (
+from video_renamer.core.stashdb_client import (
     Performer,
     Scene,
     StashDBAuthError,
@@ -13,8 +13,8 @@ from stashdb_client import (
     StashDBTransientError,
     Studio,
 )
-from title_matcher import normalize_for_match, parse_local_name
-from title_service import (
+from video_renamer.core.title_matcher import normalize_for_match, parse_local_name
+from video_renamer.core.title_service import (
     PreviewRow,
     ProgressEvent,
     TitleService,

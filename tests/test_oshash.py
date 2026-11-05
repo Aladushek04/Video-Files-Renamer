@@ -1,6 +1,6 @@
 import pytest
 
-from oshash import OshashError, oshash_from_path
+from video_renamer.core.oshash import OshashError, oshash_from_path
 
 CHUNK_SIZE = 64 * 1024
 

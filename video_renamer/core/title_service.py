@@ -28,11 +28,11 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from clean_ph_names import _cap_length
-from oshash import OshashError, oshash_from_path
-from stashdb_client import Scene, StashDBClient, StashDBTransientError
-from title_cache import TitleCache
-from title_matcher import (
+from video_renamer.core.clean_ph_names import _cap_length
+from video_renamer.core.oshash import OshashError, oshash_from_path
+from video_renamer.core.stashdb_client import Scene, StashDBClient, StashDBTransientError
+from video_renamer.core.title_cache import TitleCache
+from video_renamer.core.title_matcher import (
     LocalNameInfo,
     MatchResult,
     is_valid_final_stem,

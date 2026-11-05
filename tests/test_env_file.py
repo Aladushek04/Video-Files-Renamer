@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from env_file import load_env_file
+from video_renamer.core.env_file import load_env_file
 
 
 def test_loads_plain_export_quotes_and_comments(tmp_path, monkeypatch):
@@ -73,8 +73,8 @@ def test_invalid_lines_are_skipped(tmp_path, monkeypatch):
 
 def test_scraper_main_reads_api_key_from_dotenv(tmp_path, monkeypatch):
     """CLI без STASHDB_API_KEY в процессе берёт ключ из .env."""
-    import scrape_studios
-    from stashdb_client import Studio
+    from video_renamer.scrapers import stashdb as scrape_studios
+    from video_renamer.core.stashdb_client import Studio
 
     seen = {}
 

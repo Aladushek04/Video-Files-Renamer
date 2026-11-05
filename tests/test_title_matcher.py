@@ -1,8 +1,8 @@
 import pytest
 
-from clean_ph_names import clean_stem
-from stashdb_client import Performer, Scene, Studio
-from title_matcher import (
+from video_renamer.core.clean_ph_names import clean_stem
+from video_renamer.core.stashdb_client import Performer, Scene, Studio
+from video_renamer.core.title_matcher import (
     LocalNameInfo,
     ScoredScene,
     build_heuristic_stem,

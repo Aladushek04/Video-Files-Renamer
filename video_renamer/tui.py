@@ -30,19 +30,19 @@ from textual.widgets import (
     Static,
 )
 
-from clean_ph_names import load_studios
-from env_file import load_env_file
-from fix_video_titles import append_rename_log
-from stashdb_client import StashDBClient
-from title_cache import TitleCache
-from title_service import (
+from video_renamer.core.clean_ph_names import load_studios
+from video_renamer.core.env_file import load_env_file
+from video_renamer.cli import append_rename_log
+from video_renamer.core.stashdb_client import StashDBClient
+from video_renamer.core.title_cache import TitleCache
+from video_renamer.core.title_service import (
     ApplyReport,
     PreviewReport,
     PreviewRow,
     ProgressEvent,
     TitleService,
 )
-from tui_model import FILTERS, ReviewModel
+from video_renamer.tui_model import FILTERS, ReviewModel
 
 SOURCE_LABELS = {
     "fingerprint": "Fingerprint",
@@ -276,7 +276,7 @@ class RenamerApp(App[None]):
             else "StashDB: ключа нет — offline"
         )
         self.query_one("#api-status", Static).update(Text(key_status))
-        studios = Path("studios.json")
+        studios = Path("data/studios.json")
         if studios.exists():
             size = studios.stat().st_size / (1024 * 1024)
             db_status = f"Справочник: {size:.1f} MB"
@@ -426,7 +426,7 @@ class RenamerApp(App[None]):
         if self._preview_factory is not None:
             return self._preview_factory(folder, progress)
 
-        studios_path = Path("studios.json")
+        studios_path = Path("data/studios.json")
         studios = load_studios(str(studios_path)) if studios_path.exists() else {}
         cache = TitleCache("cache/title_fixer.sqlite3")
         client = StashDBClient(self.key) if self.key else None

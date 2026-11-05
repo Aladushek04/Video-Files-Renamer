@@ -1,0 +1,2 @@
+-r tui.txt
+pytest>=8

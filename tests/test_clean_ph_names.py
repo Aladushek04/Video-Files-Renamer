@@ -1,4 +1,4 @@
-from clean_ph_names import (
+from video_renamer.core.clean_ph_names import (
     apply_renames,
     build_new_name,
     clean_filename,

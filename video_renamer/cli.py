@@ -23,17 +23,17 @@ import sys
 from collections.abc import Sequence
 from datetime import datetime, timezone
 
-from clean_ph_names import load_studios
-from env_file import load_env_file
-from stashdb_client import (
+from video_renamer.core.clean_ph_names import load_studios
+from video_renamer.core.env_file import load_env_file
+from video_renamer.core.stashdb_client import (
     StashDBAuthError,
     StashDBClient,
     StashDBQueryError,
     StashDBResponseError,
     StashDBTransientError,
 )
-from title_cache import TitleCache
-from title_service import ApplyResult, PreviewRow, TitleService
+from video_renamer.core.title_cache import TitleCache
+from video_renamer.core.title_service import ApplyResult, PreviewRow, TitleService
 
 __all__ = [
     "append_rename_log",
@@ -52,7 +52,7 @@ _FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 DEFAULT_CSV = "preview.csv"
 DEFAULT_LOG = "rename_log.csv"
-DEFAULT_STUDIOS = "studios.json"
+DEFAULT_STUDIOS = "data/studios.json"
 DEFAULT_CACHE = os.path.join("cache", "title_fixer.sqlite3")
 
 
@@ -199,7 +199,7 @@ def _timestamp() -> str:
 def _build_parser() -> argparse.ArgumentParser:
     """Аргументы `preview` и `apply`."""
     parser = argparse.ArgumentParser(
-        prog="fix_video_titles.py",
+        prog="python -m video_renamer.cli",
         description="Prefetch scene titles and rename videos after review.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

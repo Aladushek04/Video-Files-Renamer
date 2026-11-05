@@ -1,6 +1,7 @@
 ﻿$ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-Set-Location -LiteralPath $PSScriptRoot
+$projectRoot = Split-Path -Parent $PSScriptRoot
+Set-Location -LiteralPath $projectRoot
 
 function Get-Python {
     if (Get-Command python -ErrorAction SilentlyContinue) {
@@ -9,17 +10,17 @@ function Get-Python {
     if (Get-Command py -ErrorAction SilentlyContinue) {
         return "py"
     }
-    throw "Python не найден. Установите Python 3.14 и добавьте его в PATH."
+    throw "Python не найден. Установите Python 3.10+ и добавьте его в PATH."
 }
 
 $python = Get-Python
 
-function Invoke-Python {
+function Invoke-Cli {
     param([string[]]$CliArgs)
     if ($python -eq "py") {
-        & py -3 @CliArgs
+        & py -3 -m video_renamer.cli @CliArgs
     } else {
-        & python @CliArgs
+        & python -m video_renamer.cli @CliArgs
     }
     return $LASTEXITCODE
 }
@@ -49,34 +50,29 @@ function Select-Folder {
 
 function Invoke-Preview {
     param([string]$Folder)
-    $code = Invoke-Python @(
-        "fix_video_titles.py", "preview", $Folder, "--csv", "preview.csv"
-    )
+    $code = Invoke-Cli @("preview", $Folder, "--csv", "preview.csv")
     if ($code -ne 0) {
         Write-Host "Ошибка preview (код $code)."
         Read-Host "Нажмите Enter, чтобы вернуться в меню"
         return $false
     }
     Write-Host "Готово: preview.csv"
-    Open-Path (Join-Path $PSScriptRoot "preview.csv")
+    Open-Path (Join-Path $projectRoot "preview.csv")
     return $true
 }
 
 function Invoke-Apply {
     param([string]$Folder)
-    if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot "preview.csv"))) {
+    if (-not (Test-Path -LiteralPath (Join-Path $projectRoot "preview.csv"))) {
         Write-Host "preview.csv не найден. Сначала сделайте preview."
         Read-Host "Нажмите Enter"
         return
     }
     Write-Host "Применяю только строки с approved=y..."
-    $code = Invoke-Python @(
-        "fix_video_titles.py", "apply", "preview.csv",
-        "--root", $Folder, "--apply"
-    )
+    $code = Invoke-Cli @("apply", "preview.csv", "--root", $Folder, "--apply")
     if ($code -eq 0) {
         Write-Host "Готово. Журнал: rename_log.csv"
-        Open-Path (Join-Path $PSScriptRoot "rename_log.csv")
+        Open-Path (Join-Path $projectRoot "rename_log.csv")
     } else {
         Write-Host "Ошибка apply (код $code)."
     }

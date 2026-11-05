@@ -1,9 +1,10 @@
-# Video Title Fixer
+# Video Files Renamer
 
-Локальный инструмент для переименования видео по метаданным **StashDB**.
+Локальный инструмент для переименования видео по метаданным **StashDB**,
+**FansDB** и **ThePornDB**.
 
-Он находит сцену в StashDB по отпечатку файла (OSHASH), затем — по текстову
-имени, и только в последнюю очередь — эвристикой. Готовое предложение
+Он находит сцену по отпечатку файла (OSHASH), затем — по текстовому имени, и
+только в последнюю очередь — эвристикой. Готовое предложение
 выгружается в CSV, человек проверяет и правит его, и лишь потом файлы
 переименовываются — с журналом и проверками «файл не менялся с момента
 preview».
@@ -16,25 +17,26 @@ preview».
 
 ## Что это
 
-Проект состоит из четырёх CLI и одного сервисного слоя:
+Проект — пакет `video_renamer` с CLI, TUI и скраперами:
 
-| Файл | Назначение |
+| Путь | Назначение |
 |---|---|
-| `start.bat` | дружелюбный запуск: выбрать папку, preview, открыть CSV, apply |
-| `start_tui.bat` | запуск Textual-интерфейса (сам создаёт `.venv` и ставит зависимости) |
-| `tui.py` | красивый TUI: таблица, фильтры, прогресс, подтверждение apply |
-| `tui_model.py` | чистая модель фильтров/одобрений TUI без Textual |
-| `fix_video_titles.py` | `preview` (собрать предложения) и `apply` (применить одобренное) |
-| `scrape_studios.py` | выгружает справочник студий StashDB в `studios.json` |
-| `scrape_fansdb_studios.py` | выгружает студии FansDB в `studios_fansdb.json` |
-| `scrape_theporndb_studios.py` | обогащает известные имена студиями ThePornDB через `findStudio` |
-| `merge_studios_files.py` | сливает несколько JSON-справочников в один, первый вариант побеждает |
-| `title_service.py` | сервисный слой без `print`/`argparse` — общий вход для CLI и будущего TUI |
-| `title_matcher.py` | разбор локального имени, скоринг кандидатов, сборка итогового имени |
-| `title_cache.py` | локальный SQLite-кэш ответов StashDB |
-| `stashdb_client.py` | GraphQL-клиент stash-box (StashDB, FansDB, ThePornDB) с ретраями |
-| `oshash.py` | точный OSHASH (совместим с `stashapp/stash`) |
-| `clean_ph_names.py` | старая эвристика очистки имён — используется как fallback |
+| `scripts\start.bat` | дружелюбный запуск: выбрать папку, preview, открыть CSV, apply |
+| `scripts\start_tui.bat` | запуск Textual-интерфейса (сам создаёт `.venv` и ставит зависимости) |
+| `video_renamer\cli.py` | `preview` (собрать предложения) и `apply` (применить одобренное) |
+| `video_renamer\tui.py` | красивый TUI: таблица, фильтры, прогресс, подтверждение apply |
+| `video_renamer\tui_model.py` | чистая модель фильтров/одобрений TUI без Textual |
+| `video_renamer\merge_studios.py` | сливает несколько JSON-справочников в один |
+| `video_renamer\scrapers\stashdb.py` | выгружает студии StashDB |
+| `video_renamer\scrapers\fansdb.py` | выгружает студии FansDB |
+| `video_renamer\scrapers\theporndb.py` | обогащает имена студиями ThePornDB через `findStudio` |
+| `video_renamer\core\title_service.py` | сервисный слой без `print`/`argparse` |
+| `video_renamer\core\title_matcher.py` | разбор имени, скоринг, сборка итогового имени |
+| `video_renamer\core\title_cache.py` | локальный SQLite-кэш |
+| `video_renamer\core\stashdb_client.py` | GraphQL-клиент stash-box с ретраями |
+| `video_renamer\core\oshash.py` | точный OSHASH (совместим с `stashapp/stash`) |
+| `video_renamer\core\clean_ph_names.py` | эвристика очистки имён — fallback |
+| `data\studios.json` | объединённый справочник студий (355 559 ключей) |
 
 Итоговое имя для найденной сцены собирается по шаблону:
 
@@ -51,65 +53,64 @@ preview».
 
 - **Windows 10/11** (проверено на Windows 11). Пути, длины имён и
   санитизация заточены под Windows.
-- **Python 3.14** — только стандартная библиотека, pip-зависимостей нет.
-- **Ключ StashDB API** — бесплатный, выдаётся на <https://stashdb.org>.
-  Нужен только для сетевых запросов; без него `preview` работает офлайн.
+- **Python 3.10+** (проверено на 3.14). Ядро и CLI — только стандартная
+  библиотека; TUI требует Textual.
+- **Ключи API** — StashDB, FansDB и ThePornDB. Нужны только для сетевых
+  запросов; без ключа StashDB `preview` работает офлайн.
 - **pytest** — только для разработки (прогон тестов).
 
-Ключ передаётся через переменную окружения `STASHDB_API_KEY`. Если переменной
-нет, инструмент читает `.env` в текущей папке. Значение из окружения имеет
-приоритет над `.env`. Файл `.env` защищён от коммита в `.gitignore`.
+Ключи передаются через переменные окружения `STASHDB_API_KEY`,
+`FANSDB_API_KEY`, `THE_PORNDB_API_KEY`. Если переменной нет, инструмент читает
+`.env` в текущей папке. Значение из окружения имеет приоритет над `.env`.
+Файл `.env` защищён от коммита; шаблон — `.env.example`.
 
-### Как задать ключ
+### Как задать ключи
 
 Текущая сессия PowerShell:
 
 ```powershell
 $env:STASHDB_API_KEY = "ваш-ключ"
+$env:FANSDB_API_KEY = "ваш-ключ"
+$env:THE_PORNDB_API_KEY = "ваш-ключ"
 ```
 
-Постоянно (для всех новых окон терминала):
-
-```powershell
-[Environment]::SetEnvironmentVariable("STASHDB_API_KEY", "ваш-ключ", "User")
-```
-
-После `setx`/`SetEnvironmentVariable` нужно открыть **новый** терминал —
-текущий процесс уже не увидит переменную.
+Или скопируй `.env.example` в `.env` и заполни значения. Постоянно (для всех
+новых окон терминала) можно использовать `[Environment]::SetEnvironmentVariable`;
+после этого нужно открыть новый терминал.
 
 ---
 
 ## Быстрый старт
 
-Самый простой путь — запустить `start.bat`, выбрать папку с видео и следовать
+Самый простой путь — запустить `scripts\start.bat`, выбрать папку с видео и следовать
 меню:
 
 1. **Preview** — собрать предложения, ничего не переименовывая;
 2. открыть `preview.csv`, проверить `approved` и `new`;
 3. **Preview + применить после ревью** — применить только одобренное.
 
-Для красивого интерактивного интерфейса запусти `start_tui.bat` — он сам
+Для красивого интерактивного интерфейса запусти `scripts\start_tui.bat` — он сам
 создаст `.venv`, поставит Textual и откроет TUI. Можно передать папку сразу:
-`start_tui.bat D:\Videos\PH`.
+`scripts\start_tui.bat D:\Videos\PH`.
 
 ### 1. Обновить справочник студий
 
 Нужен один раз (и потом изредка): полный справочник студий заметно улучшает
 распознавание имён в эвристике. В репозитории уже лежит объединённый
-`studios.json` из StashDB, FansDB и ThePornDB (около 355 тысяч ключей).
+`data/studios.json` из StashDB, FansDB и ThePornDB (около 355 тысяч ключей).
 Отдельные источники можно обновлять скраперами, а затем сливать:
 
 ```powershell
-python scrape_studios.py --apply
-python scrape_fansdb_studios.py --apply
-python scrape_theporndb_studios.py --apply
-python merge_studios_files.py studios.json studios_fansdb.json studios_theporndb.json --out studios.json --apply
+python -m video_renamer.scrapers.stashdb --apply
+python -m video_renamer.scrapers.fansdb --apply
+python -m video_renamer.scrapers.theporndb --apply
+python -m video_renamer.merge_studios data/studios.json data/studios_fansdb.json data/studios_theporndb.json --out data/studios.json --apply
 ```
 
 ### 2. Собрать предложения по именам
 
 ```powershell
-python fix_video_titles.py preview D:\Videos\PH --csv preview.csv
+python -m video_renamer.cli preview D:\Videos\PH --csv preview.csv
 ```
 
 Файлы на диске не меняются. Появляется `preview.csv` — одна строка на файл.
@@ -117,7 +118,7 @@ python fix_video_titles.py preview D:\Videos\PH --csv preview.csv
 Первый раз удобно ограничить выборку:
 
 ```powershell
-python fix_video_titles.py preview D:\Videos\PH --limit 5 --csv preview.csv
+python -m video_renamer.cli preview D:\Videos\PH --limit 5 --csv preview.csv
 ```
 
 ### 3. Проверить CSV
@@ -131,13 +132,13 @@ python fix_video_titles.py preview D:\Videos\PH --limit 5 --csv preview.csv
 `apply` **по умолчанию** ничего не переименовывает — он только печатает план:
 
 ```powershell
-python fix_video_titles.py apply preview.csv --root D:\Videos\PH
+python -m video_renamer.cli apply preview.csv --root D:\Videos\PH
 ```
 
 ### 5. Применить
 
 ```powershell
-python fix_video_titles.py apply preview.csv --root D:\Videos\PH --apply
+python -m video_renamer.cli apply preview.csv --root D:\Videos\PH --apply
 ```
 
 Переименуются только строки с `approved=y`. В `rename_log.csv` попадает
@@ -150,9 +151,9 @@ python fix_video_titles.py apply preview.csv --root D:\Videos\PH --apply
 ### `preview`
 
 ```text
-python fix_video_titles.py preview <каталог> [--csv preview.csv] [--recursive]
+python -m video_renamer.cli preview <каталог> [--csv preview.csv] [--recursive]
                                  [--limit N] [--no-text] [--offline]
-                                 [--refresh] [--studios studios.json]
+                                 [--refresh] [--studios data/studios.json]
                                  [--cache cache/title_fixer.sqlite3]
 ```
 
@@ -164,7 +165,7 @@ python fix_video_titles.py preview <каталог> [--csv preview.csv] [--recur
 | `--no-text` | отключить текстовый поиск в StashDB (быстрее, но меньше совпадений) |
 | `--offline` | полностью без сети: только локальный кэш и эвристика |
 | `--refresh` | игнорировать кэш и заново спросить StashDB |
-| `--studios PATH` | справочник студий (по умолчанию `studios.json`) |
+| `--studios PATH` | справочник студий (по умолчанию `data/studios.json`) |
 | `--cache PATH` | файл SQLite-кэша (по умолчанию `cache/title_fixer.sqlite3`) |
 
 Порядок работы на каждый файл:
@@ -180,7 +181,7 @@ python fix_video_titles.py preview <каталог> [--csv preview.csv] [--recur
 ### `apply`
 
 ```text
-python fix_video_titles.py apply <csv> --root <каталог> [--apply]
+python -m video_renamer.cli apply <csv> --root <каталог> [--apply]
                                 [--log rename_log.csv] [--force]
                                 [--suffix-collisions]
 ```
@@ -300,7 +301,8 @@ Excel, не вставляйте значения, начинающиеся с �
   argparse, код 2).
 - Если `STASHDB_API_KEY` не задан, `preview` сам переключается в офлайн-режим
   и печатает предупреждение — полноценный прогон без сети невозможен.
-- `scrape_studios.py` без ключа, наоборот, завершается ошибкой (код 2).
+- `python -m video_renamer.scrapers.stashdb` без ключа, наоборот,
+  завершается ошибкой (код 2).
 
 Кэш лежит в `cache/title_fixer.sqlite3` (путь меняется флагом `--cache`) и
 хранит **полный JSON сцены**, а не только идентификатор, — поэтому он
@@ -310,10 +312,10 @@ Excel, не вставляйте значения, начинающиеся с �
 
 ```powershell
 # прогон без сети по кэшу
-python fix_video_titles.py preview D:\Videos\PH --offline --csv preview.csv
+python -m video_renamer.cli preview D:\Videos\PH --offline --csv preview.csv
 
 # полностью свежий прогон по сети
-python fix_video_titles.py preview D:\Videos\PH --refresh --csv preview.csv
+python -m video_renamer.cli preview D:\Videos\PH --refresh --csv preview.csv
 ```
 
 ---
@@ -354,8 +356,8 @@ python fix_video_titles.py preview D:\Videos\PH --refresh --csv preview.csv
 ## Скрапер студий
 
 ```text
-python scrape_studios.py [--out studios.json] [--checkpoint studios_checkpoint.json]
-                         [--raw studios_raw.json] [--per-page 100] [--delay 1.0]
+python -m video_renamer.scrapers.stashdb [--out data/studios.json] [--checkpoint data/studios_checkpoint.json]
+                         [--raw data/studios_raw.json] [--per-page 100] [--delay 1.0]
                          [--max-pages N] [--apply] [--reset]
 ```
 
@@ -364,15 +366,15 @@ python scrape_studios.py [--out studios.json] [--checkpoint studios_checkpoint.j
 
 С `--apply`:
 
-- после **каждой** страницы сохраняются `studios_raw.json` и
-  `studios_checkpoint.json` — обрыв сети не теряет уже собранное, повторный
+- после **каждой** страницы сохраняются `data/studios_raw.json` и
+  `data/studios_checkpoint.json` — обрыв сети не теряет уже собранное, повторный
   запуск продолжит с той же страницы;
-- по завершении `studios.json` обновляется атомарно, предыдущая версия
-  остаётся в `studios.json.bak`;
-- ручные правки в `studios.json` не затираются: добавляются только новые
+- по завершении `data/studios.json` обновляется атомарно, предыдущая версия
+  остаётся в `data/studios.json.bak`;
+- ручные правки в `data/studios.json` не затираются: добавляются только новые
   ключи;
 - коллизии нормализованных ключей (`Brazzers` и `Brazzers!`) пишутся в
-  `studios_collisions.json` — первый по порядку API остаётся рабочим;
+  `data/studios_collisions.json` — первый по порядку API остаётся рабочим;
 - `--reset` начинает с первой страницы (чекпоинт и raw при `--apply`
   удаляются);
 - `--max-pages N` ограничивает число страниц — удобно для проверки;
@@ -393,28 +395,28 @@ python scrape_studios.py [--out studios.json] [--checkpoint studios_checkpoint.j
 Ключи берутся из `.env`: `FANSDB_API_KEY` и `THE_PORNDB_API_KEY`.
 
 ```text
-python scrape_fansdb_studios.py [--out studios_fansdb.json] [--apply] [--max-pages N]
-python scrape_theporndb_studios.py [--seed studios.json] [--out studios_theporndb.json]
+python -m video_renamer.scrapers.fansdb [--out data/studios_fansdb.json] [--apply] [--max-pages N]
+python -m video_renamer.scrapers.theporndb [--seed data/studios.json] [--out data/studios_theporndb.json]
                                   [--apply] [--batch-size 50] [--max-batches N]
 ```
 
 FansDB — обычный stash-box с `queryStudios`, поэтому его можно выгрузить
-целиком. По умолчанию пишет `studios_fansdb.json`; чтобы добавить в основной
-справочник, укажи `--out studios.json`.
+целиком. По умолчанию пишет `data/studios_fansdb.json`; чтобы добавить в основной
+справочник, укажи `--out data/studios.json`.
 
 ThePornDB **не поддерживает `queryStudios`**: в его схеме есть только
 `findStudio` по имени/ID. Поэтому его скрапер не перечисляет всё, а обогащает
-известные имена: берёт seed-файлы (по умолчанию `studios.json`), спрашивает
+известные имена: берёт seed-файлы (по умолчанию `data/studios.json`), спрашивает
 ThePornDB пакетами по 50 имён и добавляет канонические имена, родителей и
 дочерние студии. Можно передать несколько seed-файлов:
 
 ```powershell
-python scrape_theporndb_studios.py --apply --seed studios.json --out studios.json
-python scrape_theporndb_studios.py --apply --seed studios.json --seed studios_fansdb.json
+python -m video_renamer.scrapers.theporndb --apply --seed data/studios.json --out data/studios.json
+python -m video_renamer.scrapers.theporndb --apply --seed data/studios.json --seed data/studios_fansdb.json
 ```
 
-Полный прогон по `studios.json` — около 300 запросов. Если добавить в seed
-`studios_fansdb.json` (почти 400 тысяч имён), это займёт несколько часов;
+Полный прогон по `data/studios.json` — около 300 запросов. Если добавить в seed
+`data/studios_fansdb.json` (почти 400 тысяч имён), это займёт несколько часов;
 прогресс сохраняется после каждого пакета.
 
 FansDB содержит очень много пользовательских студий (около 395 тысяч), поэтому
@@ -431,12 +433,12 @@ FansDB содержит очень много пользовательских �
 ### Слияние справочников
 
 ```powershell
-python merge_studios_files.py studios.json studios_fansdb.json studios_theporndb.json --out studios.json --apply
+python -m video_renamer.merge_studios data/studios.json data/studios_fansdb.json data/studios_theporndb.json --out data/studios.json --apply
 ```
 
 Слияние аддитивное: первый встреченный вариант имени побеждает, существующие
 записи не перезаписываются, а альтернативные написания попадают в
-`studios_collisions.json`. Без `--apply` — dry-run.
+`data/studios_collisions.json`. Без `--apply` — dry-run.
 
 ---
 
@@ -468,8 +470,8 @@ python merge_studios_files.py studios.json studios_fansdb.json studios_theporndb
 - в `note` написана причина: `нет текстовых кандидатов`,
   `лучший score 0.52 < 0.60`, `текстовый guard не пройден`;
 - не стоит ли `--no-text`: текстовый поиск — второй шанс найти сцену;
-- свежесть `studios.json`: если студия не распознана, остаток имени
-  получается мусорным. Обновите: `python scrape_studios.py --apply`;
+- свежесть `data/studios.json`: если студия не распознана, остаток имени
+  получается мусорным. Обновите: `python -m video_renamer.scrapers.stashdb --apply`;
 - качество исходного имени: чем больше в нём мусора, тем ниже score;
 - кэш: после `--refresh` результаты пересчитываются, а не берутся из
   30-дневного кэша.
@@ -526,17 +528,17 @@ python merge_studios_files.py studios.json studios_fansdb.json studios_theporndb
 ## TUI
 
 ```powershell
-start_tui.bat
+scripts\start_tui.bat
 # или сразу с папкой
-start_tui.bat D:\Videos\PH
+scripts\start_tui.bat D:\Videos\PH
 # напрямую, если .venv уже готов
-.venv\Scripts\python.exe tui.py D:\Videos\PH
+.venv\Scripts\python.exe -m video_renamer.tui D:\Videos\PH
 ```
 
 Что есть в первом TUI:
 
 - выбор папки через дерево каталогов;
-- статус ключа StashDB и размера `studios.json`;
+- статус ключа StashDB и размера `data/studios.json`;
 - preview с прогресс-баром (в фоновом worker, без зависания экрана);
 - таблица: новое имя, источник, confidence, комментарий;
 - фильтры «Все / Не одобрено / Текст / Эвристика / Fingerprint / Без изменений»;
@@ -546,7 +548,7 @@ start_tui.bat D:\Videos\PH
 - горячие клавиши `p` (preview), `b` (папка), `space` (одобрить),
   `a` (apply), `q` (выход).
 
-TUI зависит от Textual (`requirements-tui.txt`), но ядро остаётся на
+TUI зависит от Textual (`requirements/tui.txt`), но ядро остаётся на
 стандартной библиотеке: CLI и тесты TUI-модели работают без Textual.
 
 Пока TUI не запускает скраперы студий и не даёт выбирать альтернативных
@@ -566,3 +568,49 @@ python -m pytest -q
 
 Тесты не ходят в сеть: сетевой слой подменяется через `transport` у
 `StashDBClient`, а кэш и каталоги — через временные папки.
+
+---
+
+## Структура репозитория
+
+```text
+video_renamer/
+├─ cli.py                 # preview / apply
+├─ tui.py                 # Textual-интерфейс
+├─ tui_model.py           # модель фильтров и approvals
+├─ merge_studios.py       # слияние JSON-справочников
+├─ core/                  # OSHASH, StashDB, кэш, матчинг, сервис
+└─ scrapers/              # StashDB, FansDB, ThePornDB
+data/
+└─ studios.json           # объединённый справочник
+scripts/                  # start.bat, start_tui.bat, start.ps1
+tests/
+docs/
+pyproject.toml
+CHANGELOG.md
+```
+
+---
+
+## Установка как пакета
+
+```powershell
+python -m pip install -e ".[tui]"
+video-renamer --help
+video-renamer-tui
+scrape-stashdb --help
+merge-studios --help
+```
+
+Для запуска из исходников установка не нужна: скрипты и `python -m ...`
+работают из корня репозитория.
+
+## Релизы
+
+Первый релиз — `v0.1.0`. История изменений — в `CHANGELOG.md`, текст для
+GitHub Release — в `docs/release-notes-v0.1.0.md`.
+
+## Лицензия
+
+Лицензия пока не выбрана. Для публичного релиза добавь `LICENSE` (например,
+MIT), если хочешь разрешить свободное использование и модификацию.

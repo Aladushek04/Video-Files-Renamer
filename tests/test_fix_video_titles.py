@@ -3,16 +3,16 @@ import csv
 
 import pytest
 
-import fix_video_titles
-from fix_video_titles import (
+from video_renamer import cli as fix_video_titles
+from video_renamer.cli import (
     append_rename_log,
     main,
     read_preview_csv,
     write_preview_csv,
 )
-from oshash import oshash_from_path
-from stashdb_client import StashDBAuthError, StashDBQueryError
-from title_service import ApplyResult, PreviewReport, PreviewRow
+from video_renamer.core.oshash import oshash_from_path
+from video_renamer.core.stashdb_client import StashDBAuthError, StashDBQueryError
+from video_renamer.core.title_service import ApplyResult, PreviewReport, PreviewRow
 
 
 def _row(tmp_path, approved=True, old="old.mp4", new="new.mp4", create=True):

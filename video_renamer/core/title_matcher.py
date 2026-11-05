@@ -23,8 +23,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
-from clean_ph_names import build_new_name, clean_stem, prepare_stem, split_name
-from stashdb_client import Scene
+from video_renamer.core.clean_ph_names import build_new_name, clean_stem, prepare_stem, split_name
+from video_renamer.core.stashdb_client import Scene
 
 __all__ = [
     "LocalNameInfo",

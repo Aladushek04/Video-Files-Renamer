@@ -2,8 +2,8 @@ import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from stashdb_client import Performer, Scene, Studio
-from title_cache import TitleCache
+from video_renamer.core.stashdb_client import Performer, Scene, Studio
+from video_renamer.core.title_cache import TitleCache
 
 
 def make_scene(i="s1"):
