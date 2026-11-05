@@ -24,6 +24,7 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from clean_ph_names import load_studios
+from env_file import load_env_file
 from stashdb_client import (
     StashDBAuthError,
     StashDBClient,
@@ -271,6 +272,7 @@ def _run_preview(args: argparse.Namespace,
         print(f"error: not a directory: {args.directory}", file=sys.stderr)
         return 2
 
+    load_env_file()
     api_key = os.environ.get("STASHDB_API_KEY", "").strip()
     offline = bool(args.offline)
     if not api_key and not offline:

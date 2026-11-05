@@ -227,7 +227,7 @@ def test_raw_roundtrip_and_missing(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_main_without_key_returns_2(tmp_path, monkeypatch):
-    monkeypatch.delenv("STASHDB_API_KEY", raising=False)
+    monkeypatch.setenv("STASHDB_API_KEY", "")
     assert main(["--out", str(tmp_path / "studios.json")]) == 2
 
 

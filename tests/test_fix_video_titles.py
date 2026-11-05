@@ -90,6 +90,34 @@ def test_preview_cli_writes_csv_and_does_not_rename(tmp_path, monkeypatch):
     assert (tmp_path / "p.csv").exists()
 
 
+def test_preview_reads_api_key_from_dotenv(tmp_path, monkeypatch):
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, api_key, **kwargs):
+            seen["api_key"] = api_key
+
+    class FakeService:
+        def __init__(self, root, studios, cache, client=None, **kwargs):
+            seen["client"] = client
+
+        def preview(self):
+            return PreviewReport(rows=(), warnings=(), had_transient_errors=False)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("STASHDB_API_KEY", raising=False)
+    (tmp_path / ".env").write_text("STASHDB_API_KEY=from-dotenv\n",
+                                   encoding="utf-8")
+    monkeypatch.setattr(fix_video_titles, "StashDBClient", FakeClient)
+    monkeypatch.setattr(fix_video_titles, "TitleService", FakeService)
+    code = main(["preview", str(tmp_path), "--no-text",
+                 "--csv", str(tmp_path / "p.csv"),
+                 "--cache", str(tmp_path / "c.sqlite3")])
+    assert code == 0
+    assert seen["api_key"] == "from-dotenv"
+    assert seen["client"] is not None
+
+
 def test_preview_missing_key_warns_and_goes_offline(tmp_path, monkeypatch, capsys):
     captured = {}
 
@@ -101,7 +129,7 @@ def test_preview_missing_key_warns_and_goes_offline(tmp_path, monkeypatch, capsy
         def preview(self):
             return PreviewReport(rows=(), warnings=(), had_transient_errors=False)
 
-    monkeypatch.delenv("STASHDB_API_KEY", raising=False)
+    monkeypatch.setenv("STASHDB_API_KEY", "")
     monkeypatch.setattr(fix_video_titles, "TitleService", FakeService)
     code = main(["preview", str(tmp_path),
                  "--csv", str(tmp_path / "p.csv"),

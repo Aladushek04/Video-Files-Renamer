@@ -27,6 +27,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from clean_ph_names import normalize_studio_key
+from env_file import load_env_file
 from stashdb_client import (
     StashDBAuthError,
     StashDBClient,
@@ -409,9 +410,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    load_env_file()
     api_key = os.environ.get("STASHDB_API_KEY", "").strip()
     if not api_key:
-        print("error: STASHDB_API_KEY is not set", file=sys.stderr)
+        print(
+            "error: STASHDB_API_KEY is not set "
+            "(checked environment and .env)",
+            file=sys.stderr,
+        )
         return 2
 
     try:
