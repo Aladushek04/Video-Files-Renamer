@@ -34,6 +34,22 @@ def test_scene_from_node_reads_all_fields():
     assert Scene.from_dict(scene.to_dict()) == scene
 
 
+def test_scene_defaults_to_stashdb_source():
+    scene = Scene(id="s1", title=None, release_date=None, date=None,
+                  code=None, duration=None)
+    assert scene.source == "StashDB"
+
+
+def test_scene_source_round_trips_through_dict():
+    scene = Scene(id="s1", title="T", release_date=None, date=None,
+                  code=None, duration=None, source="ThePornDB")
+    assert Scene.from_dict(scene.to_dict()).source == "ThePornDB"
+
+
+def test_scene_from_dict_without_source_defaults_to_stashdb():
+    assert Scene.from_dict({"id": "s1", "title": "T"}).source == "StashDB"
+
+
 def test_scene_from_node_allows_null_studio_and_alias():
     scene = scene_from_node({
         "id": "s2", "title": None, "release_date": None, "date": None,

@@ -191,6 +191,7 @@ class Scene:
     duration: int | None
     studio: Studio | None = None
     performers: tuple[Performer, ...] = ()
+    source: str = "StashDB"
 
     def to_dict(self) -> dict:
         """Плоское представление для JSON-кэша (SQLite)."""
@@ -203,6 +204,7 @@ class Scene:
             "duration": self.duration,
             "studio": self.studio.to_dict() if self.studio is not None else None,
             "performers": [p.to_dict() for p in self.performers],
+            "source": self.source,
         }
 
     @classmethod
@@ -219,6 +221,7 @@ class Scene:
             duration=data.get("duration"),
             studio=Studio.from_dict(studio_data) if studio_data else None,
             performers=tuple(Performer.from_dict(p) for p in performers),
+            source=data.get("source") or "StashDB",
         )
 
 
