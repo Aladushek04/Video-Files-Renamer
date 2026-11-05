@@ -427,6 +427,18 @@ def test_delay_is_applied_before_request():
     assert sleeps == [0.25]
 
 
+def test_execute_returns_data():
+    calls = []
+
+    def transport(req, timeout):
+        calls.append(json.loads(req.data))
+        return json.dumps({"data": {"ok": True}}).encode()
+
+    client = StashDBClient("k", delay=0, transport=transport)
+    assert client.execute("query { ok }", {"value": 1}) == {"ok": True}
+    assert calls[0]["variables"] == {"value": 1}
+
+
 def test_query_studios_parses_count():
     transport = transport_returning({"data": {"queryStudios": {
         "count": 2, "studios": [{"id": "1", "name": "A"}]}}})

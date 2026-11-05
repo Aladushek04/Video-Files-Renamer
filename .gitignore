@@ -22,10 +22,13 @@ rename_log*.csv
 # --- Скрапер студий ---
 studios_raw.json
 studios_raw*.json
+studios_*_raw.json
 studios_checkpoint.json
 studios_checkpoint*.json
+studios_*_checkpoint.json
 studios_collisions.json
 studios_collisions*.json
+studios_*_collisions.json
 studios.json.bak
 *.bak
 

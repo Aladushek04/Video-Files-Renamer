@@ -376,6 +376,10 @@ class StashDBClient:
         data = self._post(SEARCH_SCENES_QUERY, {"term": term, "limit": limit})
         return _scenes_from_nodes(data.get("searchScene"))
 
+    def execute(self, query: str, variables: dict | None = None) -> dict:
+        """Выполняет произвольный GraphQL-запрос и возвращает поле `data`."""
+        return self._post(query, variables or {})
+
     def query_studios(self, page: int, per_page: int = 100) -> tuple[list[Studio], int]:
         """Одна страница студий и общее количество (`count`)."""
         data = self._post(STUDIOS_QUERY, {"page": page, "perPage": per_page})

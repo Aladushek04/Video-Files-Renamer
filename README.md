@@ -23,7 +23,7 @@ preview».
 | `fix_video_titles.py` | `preview` (собрать предложения) и `apply` (применить одобренное) |
 | `scrape_studios.py` | выгружает справочник студий StashDB в `studios.json` |
 | `scrape_fansdb_studios.py` | выгружает студии FansDB в `studios_fansdb.json` |
-| `scrape_theporndb_studios.py` | выгружает студии ThePornDB в `studios_theporndb.json` |
+| `scrape_theporndb_studios.py` | обогащает известные имена студиями ThePornDB через `findStudio` |
 | `title_service.py` | сервисный слой без `print`/`argparse` — общий вход для CLI и будущего TUI |
 | `title_matcher.py` | разбор локального имени, скоринг кандидатов, сборка итогового имени |
 | `title_cache.py` | локальный SQLite-кэш ответов StashDB |
@@ -368,27 +368,36 @@ python scrape_studios.py [--out studios.json] [--checkpoint studios_checkpoint.j
 
 ### FansDB и ThePornDB
 
-Это тоже stash-box, поэтому формат и логика те же. Ключи берутся из `.env`:
-`FANSDB_API_KEY` и `THE_PORNDB_API_KEY`.
+Ключи берутся из `.env`: `FANSDB_API_KEY` и `THE_PORNDB_API_KEY`.
 
 ```text
 python scrape_fansdb_studios.py [--out studios_fansdb.json] [--apply] [--max-pages N]
-python scrape_theporndb_studios.py [--out studios_theporndb.json] [--apply] [--max-pages N]
+python scrape_theporndb_studios.py [--seed studios.json] [--out studios_theporndb.json]
+                                  [--apply] [--batch-size 50] [--max-batches N]
 ```
 
-По умолчанию каждый источник пишет свой файл, чтобы не смешивать разные базы.
-Если нужно добавить их в основной справочник, укажи тот же выход:
+FansDB — обычный stash-box с `queryStudios`, поэтому его можно выгрузить
+целиком. По умолчанию пишет `studios_fansdb.json`; чтобы добавить в основной
+справочник, укажи `--out studios.json`.
+
+ThePornDB **не поддерживает `queryStudios`**: в его схеме есть только
+`findStudio` по имени/ID. Поэтому его скрапер не перечисляет всё, а обогащает
+известные имена: берёт seed-файлы (по умолчанию `studios.json`), спрашивает
+ThePornDB пакетами по 50 имён и добавляет канонические имена, родителей и
+дочерние студии. Можно передать несколько seed-файлов:
 
 ```powershell
-python scrape_fansdb_studios.py --apply --out studios.json
-python scrape_theporndb_studios.py --apply --out studios.json
+python scrape_theporndb_studios.py --apply --seed studios.json --out studios.json
+python scrape_theporndb_studios.py --apply --seed studios.json --seed studios_fansdb.json
 ```
 
+Полный прогон по `studios.json` — около 300 запросов. Если добавить в seed
+`studios_fansdb.json` (почти 400 тысяч имён), это займёт несколько часов;
+прогресс сохраняется после каждого пакета.
+
 FansDB содержит очень много пользовательских студий (около 395 тысяч), поэтому
-полный прогон занимает около часа. Прогресс сохраняется после каждой страницы;
-для проверки используй `--max-pages 1`, для продолжения — обычный `--apply`.
-ThePornDB отдаёт тот же `queryStudios`; ключ должен быть в `.env` или в
-переменной окружения.
+его полный прогон занимает около часа. Для проверки используй `--max-pages 1`,
+для продолжения — обычный `--apply`.
 
 По умолчанию включён фильтр мусорных имён: пустые, чисто числовые, слишком
 короткие и явно сгенерированные ID вида `000000h (ManyVids)` или
