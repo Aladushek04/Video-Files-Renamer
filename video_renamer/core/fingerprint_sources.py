@@ -8,12 +8,17 @@
 
 Зависимостей нет — только стандартная библиотека.
 """
+from collections.abc import Sequence
 from dataclasses import dataclass
+
+from video_renamer.core.stashdb_client import Scene
+from video_renamer.core.title_matcher import normalize_for_match
 
 __all__ = [
     "FINGERPRINT_SOURCES",
     "FingerprintSource",
     "PRIMARY_SOURCE_NAME",
+    "merge_scenes",
 ]
 
 PRIMARY_SOURCE_NAME = "StashDB"
@@ -26,6 +31,36 @@ class FingerprintSource:
     name: str
     endpoint: str
     api_key_env: str
+
+
+def _dedupe_key(scene: Scene) -> tuple[str, str, str]:
+    """Ключ одной и той же сцены: название, дата и студия после нормализации."""
+    studio = scene.studio.name if scene.studio is not None else ""
+    return (
+        normalize_for_match(scene.title or ""),
+        scene.release_date or scene.date or "",
+        normalize_for_match(studio or ""),
+    )
+
+
+def merge_scenes(per_source: Sequence[Sequence[Scene]]) -> list[Scene]:
+    """Объединяет сцены источников; одинаковые сцены остаются из раннего источника.
+
+    Порядок результата: сцены первого источника в исходном порядке, затем новые
+    из следующих. Одинаковой считается сцена с тем же ключом `_dedupe_key`.
+    Сцены без названия не объединяются: по пустому ключу нельзя доказать, что
+    это одна и та же сцена.
+    """
+    seen: set[tuple[str, str, str]] = set()
+    merged: list[Scene] = []
+    for scenes in per_source:
+        for scene in scenes:
+            key = _dedupe_key(scene)
+            if key[0] and key in seen:
+                continue
+            seen.add(key)
+            merged.append(scene)
+    return merged
 
 
 FINGERPRINT_SOURCES: tuple[FingerprintSource, ...] = (
