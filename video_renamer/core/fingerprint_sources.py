@@ -8,16 +8,17 @@
 
 Зависимостей нет — только стандартная библиотека.
 """
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from video_renamer.core.stashdb_client import Scene
+from video_renamer.core.stashdb_client import Scene, StashDBClient
 from video_renamer.core.title_matcher import normalize_for_match
 
 __all__ = [
     "FINGERPRINT_SOURCES",
     "FingerprintSource",
     "PRIMARY_SOURCE_NAME",
+    "build_fingerprint_clients",
     "merge_scenes",
 ]
 
@@ -61,6 +62,24 @@ def merge_scenes(per_source: Sequence[Sequence[Scene]]) -> list[Scene]:
             seen.add(key)
             merged.append(scene)
     return merged
+
+
+def build_fingerprint_clients(
+    env: Mapping[str, str], *, offline: bool
+) -> dict[str, StashDBClient]:
+    """Клиенты вторичных источников; без ключа источник пропускается.
+
+    Клиент StashDB сюда не входит: он создаётся вызывающим кодом. В офлайн-режиме
+    сеть не нужна, клиенты не создаются.
+    """
+    if offline:
+        return {}
+    clients: dict[str, StashDBClient] = {}
+    for source in FINGERPRINT_SOURCES[1:]:
+        key = (env.get(source.api_key_env) or "").strip()
+        if key:
+            clients[source.name] = StashDBClient(key, endpoint=source.endpoint)
+    return clients
 
 
 FINGERPRINT_SOURCES: tuple[FingerprintSource, ...] = (

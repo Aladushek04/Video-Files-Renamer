@@ -1,6 +1,7 @@
 from video_renamer.core.fingerprint_sources import (
     FINGERPRINT_SOURCES,
     PRIMARY_SOURCE_NAME,
+    build_fingerprint_clients,
     merge_scenes,
 )
 from video_renamer.core.stashdb_client import Scene, Studio
@@ -38,6 +39,21 @@ def test_fingerprint_sources_key_env_names_match_scrapers():
     assert by_name["StashDB"].api_key_env == "STASHDB_API_KEY"
     assert by_name["ThePornDB"].api_key_env == "THE_PORNDB_API_KEY"
     assert by_name["FansDB"].api_key_env == "FANSDB_API_KEY"
+
+
+def test_missing_secondary_key_is_skipped():
+    clients = build_fingerprint_clients({"THE_PORNDB_API_KEY": ""}, offline=False)
+    assert "ThePornDB" not in clients
+
+
+def test_secondary_clients_built_when_keys_present():
+    clients = build_fingerprint_clients(
+        {"THE_PORNDB_API_KEY": "t", "FANSDB_API_KEY": "f"}, offline=False)
+    assert set(clients) == {"ThePornDB", "FansDB"}
+
+
+def test_offline_builds_no_clients():
+    assert build_fingerprint_clients({"FANSDB_API_KEY": "f"}, offline=True) == {}
 
 
 def test_merge_scenes_collapses_duplicates_across_sources():

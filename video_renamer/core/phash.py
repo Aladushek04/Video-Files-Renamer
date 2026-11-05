@@ -25,6 +25,7 @@ __all__ = [
     "PhashError",
     "PhashToolError",
     "build_montage",
+    "check_phash_tools",
     "decode_bmp",
     "dct_top_left_8x8",
     "extract_frame",
@@ -70,6 +71,22 @@ def _run(args: list[str], run) -> subprocess.CompletedProcess:
         )
     except OSError as exc:
         raise PhashToolError(f"cannot run {args[0]}: {exc}") from exc
+
+
+def check_phash_tools(ffmpeg: str, ffprobe: str, run=subprocess.run) -> None:
+    """Проверяет, что ffmpeg и ffprobe запускаются; иначе `PhashToolError`."""
+    for name, binary in (("ffmpeg", ffmpeg), ("ffprobe", ffprobe)):
+        try:
+            result = run(
+                [binary, "-version"],
+                capture_output=True,
+                check=False,
+                creationflags=_CREATE_NO_WINDOW,
+            )
+        except OSError as exc:
+            raise PhashToolError(f"{name} not found or not runnable: {binary}") from exc
+        if result.returncode != 0:
+            raise PhashToolError(f"{name} failed to run: {binary}")
 
 
 def probe_duration(path: str, ffprobe: str, run=subprocess.run) -> float:

@@ -16,6 +16,16 @@ from video_renamer.core.stashdb_client import StashDBAuthError, StashDBQueryErro
 from video_renamer.core.title_service import ApplyResult, PreviewReport, PreviewRow
 
 
+def test_phash_missing_tool_fails_fast(tmp_path, capsys):
+    csv_path = tmp_path / "preview.csv"
+    code = main(["preview", str(tmp_path), "--offline", "--phash",
+                 "--ffmpeg", r"C:\nope\ffmpeg.exe",
+                 "--csv", str(csv_path)])
+    assert code == 2
+    assert "ffmpeg" in capsys.readouterr().err
+    assert not csv_path.exists()
+
+
 def _row(tmp_path, approved=True, old="old.mp4", new="new.mp4", create=True):
     """Строка preview с реальными size/oshash для файла в tmp_path."""
     path = tmp_path / old

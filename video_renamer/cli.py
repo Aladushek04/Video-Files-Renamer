@@ -31,6 +31,8 @@ from video_renamer.core.stashdb_client import (
     StashDBResponseError,
     StashDBTransientError,
 )
+from video_renamer.core.fingerprint_sources import build_fingerprint_clients
+from video_renamer.core.phash import PhashToolError, check_phash_tools
 from video_renamer.core.title_cache import TitleCache
 from video_renamer.core.title_service import ApplyResult, PreviewRow, TitleService
 from video_renamer.paths import CACHE_PATH, LOG_PATH, STUDIOS_PATH, load_project_env
@@ -232,6 +234,14 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="studios JSON (default: studios.json)")
     preview.add_argument("--cache", default=DEFAULT_CACHE,
                          help="SQLite cache path")
+    preview.add_argument("--phash", action="store_true",
+                         help="also search by PHASH (runs ffmpeg per file; slow)")
+    preview.add_argument("--ffmpeg", default=None,
+                         help="ffmpeg executable (default: FFMPEG_PATH or PATH)")
+    preview.add_argument("--ffprobe", default=None,
+                         help="ffprobe executable (default: FFPROBE_PATH or PATH)")
+    preview.add_argument("--no-secondary", action="store_true",
+                         help="do not query ThePornDB and FansDB")
     preview.set_defaults(handler=_run_preview)
 
     apply = subparsers.add_parser(
@@ -281,6 +291,15 @@ def _run_preview(args: argparse.Namespace,
         return 2
 
     load_project_env()
+    ffmpeg = args.ffmpeg or os.environ.get("FFMPEG_PATH") or "ffmpeg"
+    ffprobe = args.ffprobe or os.environ.get("FFPROBE_PATH") or "ffprobe"
+    if args.phash:
+        try:
+            check_phash_tools(ffmpeg, ffprobe)
+        except PhashToolError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+
     api_key = os.environ.get("STASHDB_API_KEY", "").strip()
     offline = bool(args.offline)
     if not api_key and not offline:
@@ -303,6 +322,9 @@ def _run_preview(args: argparse.Namespace,
         return 2
 
     client = StashDBClient(api_key) if api_key and not offline else None
+    secondary = {} if args.no_secondary else build_fingerprint_clients(
+        os.environ, offline=offline
+    )
     try:
         report = TitleService(
             args.directory,
@@ -314,6 +336,10 @@ def _run_preview(args: argparse.Namespace,
             offline=offline,
             refresh=args.refresh,
             limit=args.limit,
+            extra_clients=secondary,
+            phash=args.phash,
+            ffmpeg=ffmpeg,
+            ffprobe=ffprobe,
         ).preview()
     except StashDBAuthError as exc:
         print(
@@ -328,6 +354,9 @@ def _run_preview(args: argparse.Namespace,
     except StashDBTransientError as exc:
         print(f"error: StashDB request failed: {exc}", file=sys.stderr)
         return 1
+    except PhashToolError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     finally:
         cache.close()
 

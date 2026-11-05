@@ -9,6 +9,7 @@ from video_renamer.core.phash import (
     PhashError,
     PhashToolError,
     build_montage,
+    check_phash_tools,
     decode_bmp,
     dct_top_left_8x8,
     extract_frame,
@@ -115,6 +116,11 @@ def test_extract_frame_empty_output_is_phash_error():
 
     with pytest.raises(PhashError):
         extract_frame("C:\\v.mp4", 1.0, accurate=False, ffmpeg="ffmpeg", run=fake_run)
+
+
+def test_check_phash_tools_reports_missing_binary():
+    with pytest.raises(PhashToolError, match="ffmpeg"):
+        check_phash_tools(r"C:\definitely\missing\ffmpeg.exe", "ffprobe")
 
 
 def test_missing_tool_is_phash_tool_error():
