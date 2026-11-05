@@ -191,6 +191,7 @@ class Scene:
     duration: int | None
     studio: Studio | None = None
     performers: tuple[Performer, ...] = ()
+    source: str = "StashDB"
 
     def to_dict(self) -> dict:
         """Плоское представление для JSON-кэша (SQLite)."""
@@ -203,6 +204,7 @@ class Scene:
             "duration": self.duration,
             "studio": self.studio.to_dict() if self.studio is not None else None,
             "performers": [p.to_dict() for p in self.performers],
+            "source": self.source,
         }
 
     @classmethod
@@ -219,6 +221,7 @@ class Scene:
             duration=data.get("duration"),
             studio=Studio.from_dict(studio_data) if studio_data else None,
             performers=tuple(Performer.from_dict(p) for p in performers),
+            source=data.get("source") or "StashDB",
         )
 
 
@@ -340,8 +343,10 @@ class StashDBClient:
         self._sleep = sleep
         self._transport = transport
 
-    def find_scenes_by_hashes(self, hashes: Sequence[str]) -> list[list[Scene]]:
-        """Сцены для каждого OSHASH-отпечатка, в порядке входных хэшей.
+    def find_scenes_by_hashes(
+        self, hashes: Sequence[str], algorithm: str = "OSHASH"
+    ) -> list[list[Scene]]:
+        """Сцены для каждого фингерпринта указанного алгоритма, в порядке входных хэшей.
 
         Дубликаты запрашиваются один раз; результат выровнен по исходной
         последовательности (включая повторные хэши). Хэши отправляются
@@ -358,7 +363,7 @@ class StashDBClient:
                 SCENES_BY_FINGERPRINTS_QUERY,
                 {
                     "fingerprints": [
-                        [{"hash": h, "algorithm": "OSHASH"}] for h in batch
+                        [{"hash": h, "algorithm": algorithm}] for h in batch
                     ]
                 },
             )

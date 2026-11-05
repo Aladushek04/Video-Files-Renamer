@@ -12,6 +12,7 @@ FILTERS: tuple[tuple[str, str], ...] = (
     ("text", "Текст"),
     ("heuristic", "Эвристика"),
     ("fingerprint", "Fingerprint"),
+    ("phash", "PHASH"),
     ("unchanged", "Без изменений"),
 )
 
@@ -99,6 +100,7 @@ class ReviewModel:
             "text": 0,
             "heuristic": 0,
             "fingerprint": 0,
+            "phash": 0,
             "unchanged": 0,
         }
         for row in self.rows:

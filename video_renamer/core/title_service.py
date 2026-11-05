@@ -24,13 +24,25 @@ subprocess — это задача CLI/TUI.
 import ntpath
 import os
 import stat
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from uuid import uuid4
 
 from video_renamer.core.clean_ph_names import _cap_length
+from video_renamer.core.fingerprint_sources import (
+    FINGERPRINT_SOURCES,
+    PRIMARY_SOURCE_NAME,
+    merge_scenes,
+)
 from video_renamer.core.oshash import OshashError, oshash_from_path
-from video_renamer.core.stashdb_client import Scene, StashDBClient, StashDBTransientError
+from video_renamer.core.phash import PhashError, format_phash, phash_from_path
+from video_renamer.core.stashdb_client import (
+    Scene,
+    StashDBAuthError,
+    StashDBClient,
+    StashDBError,
+    StashDBTransientError,
+)
 from video_renamer.core.title_cache import TitleCache
 from video_renamer.core.title_matcher import (
     LocalNameInfo,
@@ -132,7 +144,10 @@ class _Candidate:
     hash_error: str = ""
     fingerprint_scenes: list[Scene] = field(default_factory=list)
     text_scenes: list[Scene] = field(default_factory=list)
-    fingerprint_error: bool = False
+    phash: str = ""
+    phash_scenes: list[Scene] = field(default_factory=list)
+    phash_error: str = ""
+    failed_sources: list[str] = field(default_factory=list)
     text_error: bool = False
 
 
@@ -296,6 +311,11 @@ class TitleService:
         limit: int | None = None,
         oshash_func: Callable[[str], str] = oshash_from_path,
         progress: Callable[[ProgressEvent], None] | None = None,
+        extra_clients: Mapping[str, StashDBClient] | None = None,
+        phash: bool = False,
+        phash_func: Callable[[str], str] | None = None,
+        ffmpeg: str = "ffmpeg",
+        ffprobe: str = "ffprobe",
     ) -> None:
         self._root = os.path.abspath(os.fspath(root))
         self._studios = dict(studios)
@@ -308,6 +328,16 @@ class TitleService:
         self._limit = limit
         self._oshash_func = oshash_func
         self._progress = progress
+        self._extra_clients = dict(extra_clients or {})
+        self._phash = phash
+        self._ffmpeg = ffmpeg
+        self._ffprobe = ffprobe
+        self._phash_func = phash_func or self._default_phash
+
+    def _default_phash(self, path: str) -> str:
+        return format_phash(
+            phash_from_path(path, ffmpeg=self._ffmpeg, ffprobe=self._ffprobe)
+        )
 
     @property
     def root(self) -> str:
@@ -392,20 +422,27 @@ class TitleService:
         had_transient = False
 
         candidates = self._collect(files, total, warnings)
-        fingerprint_errors = self._resolve_fingerprints(
+        oshash_failures, oshash_transient = self._resolve_fingerprints(
             candidates, warnings
         )
-        if fingerprint_errors:
-            had_transient = True
+        phash_failures, phash_transient = (
+            self._resolve_phash(candidates, warnings) if self._phash else ({}, False)
+        )
         text_failed = self._resolve_text(candidates, warnings)
-        if text_failed:
+        if oshash_transient or phash_transient or text_failed:
             had_transient = True
 
         for candidate in candidates:
-            candidate.fingerprint_error = (
-                bool(candidate.oshash)
-                and candidate.oshash in fingerprint_errors
-            )
+            failed = [
+                name for name, digests in oshash_failures.items()
+                if candidate.oshash and candidate.oshash in digests
+            ]
+            failed += [
+                name for name, digests in phash_failures.items()
+                if candidate.phash and candidate.phash in digests
+                and name not in failed
+            ]
+            candidate.failed_sources = failed
             candidate.text_error = candidate.rel in text_failed
 
         planned = self._plan(candidates)
@@ -758,36 +795,65 @@ class TitleService:
         return self._cache is not None and (not self._refresh or self._offline)
 
     def _network_allowed(self) -> bool:
-        return self._client is not None and not self._offline
+        return self._source_network_allowed(self._client)
 
-    def _resolve_fingerprints(
-        self, candidates: Sequence[_Candidate], warnings: list[str]
-    ) -> set[str]:
-        """Дополняет кандидатов сценами по OSHASH; возвращает сбойные хэши."""
-        unique = list(dict.fromkeys(
-            candidate.oshash for candidate in candidates if candidate.oshash
-        ))
+    def _source_network_allowed(self, client: StashDBClient | None) -> bool:
+        return client is not None and not self._offline
+
+    def _fingerprint_clients(self) -> list[tuple[str, StashDBClient | None]]:
+        """Источники в порядке приоритета: StashDB, затем ThePornDB и FansDB."""
+        clients: list[tuple[str, StashDBClient | None]] = [
+            (PRIMARY_SOURCE_NAME, self._client)
+        ]
+        for source in FINGERPRINT_SOURCES[1:]:
+            client = self._extra_clients.get(source.name)
+            if client is not None:
+                clients.append((source.name, client))
+        return clients
+
+    def _lookup_source(
+        self,
+        name: str,
+        client: StashDBClient | None,
+        algorithm: str,
+        digests: Sequence[str],
+        warnings: list[str],
+    ) -> tuple[dict[str, list[Scene]], set[str], bool]:
+        """Сцены одного источника по фингерпринтам.
+
+        Возвращает сцены, сбойные хэши (для заметки `<Имя>_error`) и признак
+        временной ошибки (для кода возврата 1). Сбойные хэши не кэшируются.
+        Неверный ключ и ошибка запроса вторичного источника — предупреждение и
+        сбойные хэши, но не временная ошибка. Неверный ключ и ошибка запроса
+        StashDB пробрасываются наружу.
+        """
         resolved: dict[str, list[Scene]] = {}
         missing: list[str] = []
-
         if self._cache_reads_allowed():
-            for digest in unique:
-                cached = self._cache.get_fingerprint(digest)
+            for digest in digests:
+                cached = self._cache.get_source_fingerprint(name, algorithm, digest)
                 if cached is None:
                     missing.append(digest)
                 else:
                     resolved[digest] = list(cached)
         else:
-            missing = list(unique)
+            missing = list(digests)
 
         failed: set[str] = set()
-        if missing and self._network_allowed():
+        transient = False
+        if missing and self._source_network_allowed(client):
             try:
-                groups = self._client.find_scenes_by_hashes(missing)
+                groups = client.find_scenes_by_hashes(missing, algorithm=algorithm)
             except StashDBTransientError as exc:
-                warnings.append(
-                    f"StashDB fingerprint lookup failed: {exc}"
-                )
+                warnings.append(self._source_warning(name, algorithm, exc))
+                failed = set(missing)
+                transient = True
+                for digest in missing:
+                    resolved[digest] = []
+            except StashDBError as exc:
+                if name == PRIMARY_SOURCE_NAME:
+                    raise
+                warnings.append(self._source_warning(name, algorithm, exc))
                 failed = set(missing)
                 for digest in missing:
                     resolved[digest] = []
@@ -796,31 +862,126 @@ class TitleService:
                     groups = []
                 for position, digest in enumerate(missing):
                     group = groups[position] if position < len(groups) else []
-                    scenes = _as_scenes(group)
+                    scenes = [replace(scene, source=name) for scene in _as_scenes(group)]
                     resolved[digest] = scenes
                     # Отрицательный результат кэшируется намеренно; результат
                     # временной ошибки — нет, иначе кэш отравится на TTL.
                     if self._cache is not None:
-                        self._cache.put_fingerprint(digest, scenes)
+                        self._cache.put_source_fingerprint(name, algorithm, digest, scenes)
         else:
             # Нет сети/клиента или кэш пуст: считаем, что сцен нет, но
             # отрицательный результат не пишем — он не подтверждён запросом.
             for digest in missing:
                 resolved[digest] = []
+        return resolved, failed, transient
+
+    @staticmethod
+    def _source_warning(name: str, algorithm: str, exc: StashDBError) -> str:
+        """Текст предупреждения о сбое источника; для вторичных — без слова StashDB."""
+        if name == PRIMARY_SOURCE_NAME:
+            return f"{name} {algorithm} lookup failed: {exc}"
+        env_name = next(
+            source.api_key_env for source in FINGERPRINT_SOURCES
+            if source.name == name
+        )
+        if isinstance(exc, StashDBAuthError):
+            return f"{name} {algorithm}: ключ отклонён, проверь {env_name}"
+        if isinstance(exc, StashDBTransientError):
+            return f"{name} {algorithm}: временная ошибка сети или сервера"
+        return f"{name} {algorithm}: ошибка запроса"
+
+    def _resolve_fingerprints(
+        self, candidates: Sequence[_Candidate], warnings: list[str]
+    ) -> tuple[dict[str, set[str]], bool]:
+        """Дополняет кандидатов сценами по OSHASH из всех источников.
+
+        Возвращает сбойные хэши по каждому источнику и признак временной ошибки.
+        """
+        unique = list(dict.fromkeys(
+            candidate.oshash for candidate in candidates if candidate.oshash
+        ))
+        per_source: dict[str, dict[str, list[Scene]]] = {}
+        failures: dict[str, set[str]] = {}
+        fetched = 0
+        transient = False
+        for name, client in self._fingerprint_clients():
+            resolved, failed, source_transient = self._lookup_source(
+                name, client, "OSHASH", unique, warnings
+            )
+            per_source[name] = resolved
+            failures[name] = failed
+            transient = transient or source_transient
+            fetched += len(failed)
 
         for candidate in candidates:
             if candidate.oshash:
-                candidate.fingerprint_scenes = list(
-                    resolved.get(candidate.oshash, [])
-                )
+                candidate.fingerprint_scenes = merge_scenes([
+                    per_source[name].get(candidate.oshash, [])
+                    for name in per_source
+                ])
 
         self._emit(
             "fingerprint",
             len(unique),
             len(unique),
-            f"{len(missing)} fetched",
+            f"{fetched} failed",
         )
-        return failed
+        return failures, transient
+
+    def _resolve_phash(
+        self, candidates: Sequence[_Candidate], warnings: list[str]
+    ) -> tuple[dict[str, set[str]], bool]:
+        """PHASH для файлов без OSHASH-совпадения.
+
+        Возвращает сбойные хэши по источникам и признак временной ошибки.
+        """
+        pending = [
+            candidate for candidate in candidates
+            if candidate.oshash and not candidate.fingerprint_scenes
+            and not candidate.hash_error
+        ]
+        total = len(pending)
+        for index, candidate in enumerate(pending):
+            candidate.phash = self._local_phash(candidate)
+            self._emit("phash", index + 1, total, candidate.rel)
+
+        digests = list(dict.fromkeys(
+            candidate.phash for candidate in pending if candidate.phash
+        ))
+        per_source: dict[str, dict[str, list[Scene]]] = {}
+        failures: dict[str, set[str]] = {}
+        transient = False
+        for name, client in self._fingerprint_clients():
+            resolved, failed, source_transient = self._lookup_source(
+                name, client, "PHASH", digests, warnings
+            )
+            per_source[name] = resolved
+            failures[name] = failed
+            transient = transient or source_transient
+
+        for candidate in pending:
+            if candidate.phash:
+                candidate.phash_scenes = merge_scenes([
+                    per_source[name].get(candidate.phash, [])
+                    for name in per_source
+                ])
+        self._emit("phash", total, total, "")
+        return failures, transient
+
+    def _local_phash(self, candidate: _Candidate) -> str:
+        """PHASH файла из локального кэша или вычисленный; `""` при ошибке файла."""
+        if self._cache is not None:
+            cached = self._cache.get_local_phash(candidate.oshash, candidate.size)
+            if cached:
+                return cached
+        try:
+            value = self._phash_func(candidate.path)
+        except PhashError as exc:
+            candidate.phash_error = str(exc) or exc.__class__.__name__
+            return ""
+        if self._cache is not None:
+            self._cache.put_local_phash(candidate.oshash, candidate.size, value)
+        return value
 
     def _resolve_text(
         self, candidates: Sequence[_Candidate], warnings: list[str]
@@ -834,7 +995,7 @@ class TitleService:
         pending: list[tuple[_Candidate, str]] = []
         if self._text_search:
             for candidate in candidates:
-                if candidate.fingerprint_scenes:
+                if candidate.fingerprint_scenes or candidate.phash_scenes:
                     continue
                 term = normalize_for_match(candidate.local.rest)
                 if term:
@@ -880,6 +1041,7 @@ class TitleService:
                 self._studios,
                 candidate.fingerprint_scenes,
                 candidate.text_scenes,
+                candidate.phash_scenes,
             )
             final_name = _cap_length(match.new_stem, candidate.suffix)
             final_stem = self._stem(final_name, candidate.suffix)
@@ -889,7 +1051,14 @@ class TitleService:
                 note = _join_note(
                     note, f"hash error: {candidate.hash_error}"
                 )
-            if candidate.fingerprint_error or candidate.text_error:
+            if candidate.phash_error:
+                note = _join_note(
+                    note, f"phash error: {candidate.phash_error}"
+                )
+            for name in candidate.failed_sources:
+                token = "stashdb_error" if name == PRIMARY_SOURCE_NAME else f"{name}_error"
+                note = _join_note(note, token)
+            if candidate.text_error and "stashdb_error" not in note:
                 note = _join_note(note, "stashdb_error")
 
             if final_name == candidate.name:

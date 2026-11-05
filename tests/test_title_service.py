@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from video_renamer.core import title_service
-
+from video_renamer.core.phash import PhashError, PhashToolError
 from video_renamer.core.stashdb_client import (
     Performer,
     Scene,
@@ -49,6 +49,8 @@ class FakeCache:
         self.fingerprint_puts = []
         self.text_gets = []
         self.text_puts = []
+        self.source_store = {}
+        self.local_phash_store = {}
 
     def get_fingerprint(self, oshash):
         self.fingerprint_gets.append(oshash)
@@ -58,6 +60,23 @@ class FakeCache:
         stored = list(scenes)
         self.fingerprint_puts.append((oshash, stored))
         self.fingerprints[oshash] = stored
+
+    def get_source_fingerprint(self, source, algorithm, digest):
+        if (source, algorithm) == ("StashDB", "OSHASH"):
+            return self.get_fingerprint(digest)
+        return self.source_store.get((source, algorithm, digest))
+
+    def put_source_fingerprint(self, source, algorithm, digest, scenes):
+        if (source, algorithm) == ("StashDB", "OSHASH"):
+            self.put_fingerprint(digest, scenes)
+            return
+        self.source_store[(source, algorithm, digest)] = list(scenes)
+
+    def get_local_phash(self, oshash, size):
+        return self.local_phash_store.get((oshash, size))
+
+    def put_local_phash(self, oshash, size, phash):
+        self.local_phash_store[(oshash, size)] = phash
 
     def get_text_query(self, term):
         self.text_gets.append(term)
@@ -71,15 +90,23 @@ class FakeCache:
 
 class FakeClient:
     def __init__(self, by_hash=None, text=None, hash_error=None,
-                 text_error=None):
+                 text_error=None, phash_by_hash=None, phash_error=None):
         self.by_hash = by_hash
         self.text = list(text or [])
         self.hash_error = hash_error
         self.text_error = text_error
+        self.phash_by_hash = dict(phash_by_hash or {})
+        self.phash_error = phash_error
         self.hash_calls = []
+        self.phash_calls = []
         self.text_calls = []
 
-    def find_scenes_by_hashes(self, hashes):
+    def find_scenes_by_hashes(self, hashes, algorithm="OSHASH"):
+        if algorithm == "PHASH":
+            self.phash_calls.append(list(hashes))
+            if self.phash_error is not None:
+                raise self.phash_error
+            return [list(self.phash_by_hash.get(value, [])) for value in hashes]
         self.hash_calls.append(list(hashes))
         if self.hash_error is not None:
             raise self.hash_error
@@ -100,6 +127,169 @@ def write(path: Path, size: int = 100) -> None:
 
 def by_name(mapping):
     return lambda path: mapping[Path(path).name]
+
+
+# --- multiple fingerprint sources and PHASH --------------------------------
+
+NAMED_FILE = "brazzersexxtra 26.10.03 ryan reid poking glory.mp4"
+
+
+def test_fingerprint_single_merged_scene_is_approved(tmp_path):
+    write(tmp_path / NAMED_FILE)
+    stash = FakeClient(by_hash={"h": [scene(scene_id="a")]})
+    porn = FakeClient(by_hash={"h": [scene(scene_id="b")]})
+    report = TitleService(
+        str(tmp_path), {}, FakeCache(), stash,
+        oshash_func=lambda path: "h", extra_clients={"ThePornDB": porn},
+    ).preview()
+
+    row = report.rows[0]
+    assert row.approved is True
+    assert row.source == "fingerprint"
+    assert row.scene_id == "a"
+
+
+def test_secondary_scene_source_is_recorded_in_cache(tmp_path):
+    write(tmp_path / "a.mp4")
+    cache = FakeCache()
+    stash = FakeClient(by_hash={"h": []})
+    porn = FakeClient(by_hash={"h": [scene(scene_id="p")]})
+    TitleService(
+        str(tmp_path), {}, cache, stash,
+        oshash_func=lambda path: "h", extra_clients={"ThePornDB": porn},
+    ).preview()
+
+    stored = cache.get_source_fingerprint("ThePornDB", "OSHASH", "h")
+    assert stored[0].id == "p"
+    assert stored[0].source == "ThePornDB"
+
+
+def test_secondary_source_auth_error_is_warning(tmp_path):
+    write(tmp_path / NAMED_FILE)
+    stash = FakeClient(by_hash={"h": [scene()]})
+    porn = FakeClient(hash_error=StashDBAuthError(
+        "StashDB rejected the API key (HTTP 401)"))
+    report = TitleService(
+        str(tmp_path), {}, FakeCache(), stash,
+        oshash_func=lambda path: "h", extra_clients={"ThePornDB": porn},
+    ).preview()
+
+    assert report.rows[0].scene_id == "s1"
+    warning = next(w for w in report.warnings if "ThePornDB" in w)
+    assert "StashDB" not in warning
+    assert "THE_PORNDB_API_KEY" in warning
+    assert "ThePornDB_error" in report.rows[0].note
+    assert report.had_transient_errors is False
+
+
+def test_secondary_transient_error_marks_row(tmp_path):
+    write(tmp_path / "a.mp4")
+    stash = FakeClient(by_hash={"h": []})
+    fans = FakeClient(hash_error=StashDBTransientError("timeout"))
+    report = TitleService(
+        str(tmp_path), {}, FakeCache(), stash,
+        oshash_func=lambda path: "h", extra_clients={"FansDB": fans},
+    ).preview()
+
+    assert "FansDB_error" in report.rows[0].note
+    assert report.had_transient_errors is True
+
+
+def test_phash_runs_only_without_oshash_match(tmp_path):
+    write(tmp_path / "a.mp4")
+    calls = []
+
+    def hasher(path):
+        calls.append(path)
+        return "dc75c0f03795438e"
+
+    stash = FakeClient(by_hash={"h": [scene()]})
+    TitleService(
+        str(tmp_path), {}, FakeCache(), stash,
+        oshash_func=lambda path: "h", phash=True, phash_func=hasher,
+    ).preview()
+
+    assert calls == []
+
+
+def test_phash_match_is_never_approved(tmp_path):
+    write(tmp_path / "a.mp4")
+    stash = FakeClient(
+        by_hash={"h": []},
+        phash_by_hash={"dc75c0f03795438e": [scene(scene_id="p")]},
+    )
+    report = TitleService(
+        str(tmp_path), {}, FakeCache(), stash,
+        oshash_func=lambda path: "h", phash=True,
+        phash_func=lambda path: "dc75c0f03795438e",
+    ).preview()
+
+    row = report.rows[0]
+    assert row.source == "phash"
+    assert row.approved is False
+    assert row.scene_id == "p"
+
+
+def test_phash_error_per_file_does_not_stop_preview(tmp_path):
+    write(tmp_path / "a.mp4")
+    write(tmp_path / "b.mp4")
+
+    def broken(path):
+        raise PhashError("ffmpeg returned no frame")
+
+    report = TitleService(
+        str(tmp_path), {}, FakeCache(), FakeClient(by_hash={}),
+        oshash_func=lambda path: "h", phash=True, phash_func=broken,
+    ).preview()
+
+    assert len(report.rows) == 2
+    assert all("phash error" in row.note for row in report.rows)
+
+
+def test_phash_local_cache_avoids_recomputation(tmp_path):
+    write(tmp_path / "a.mp4")
+    calls = []
+
+    def hasher(path):
+        calls.append(path)
+        return "dc75c0f03795438e"
+
+    cache = FakeCache()
+    for _ in range(2):
+        TitleService(
+            str(tmp_path), {}, cache, FakeClient(by_hash={"h": []}),
+            oshash_func=lambda path: "h", phash=True, phash_func=hasher,
+        ).preview()
+
+    assert len(calls) == 1
+
+
+def test_phash_tool_error_propagates(tmp_path):
+    write(tmp_path / "a.mp4")
+
+    def missing(path):
+        raise PhashToolError("ffmpeg not found")
+
+    with pytest.raises(PhashToolError):
+        TitleService(
+            str(tmp_path), {}, FakeCache(), FakeClient(by_hash={"h": []}),
+            oshash_func=lambda path: "h", phash=True, phash_func=missing,
+        ).preview()
+
+
+def test_offline_reads_secondary_cache_without_network(tmp_path):
+    write(tmp_path / NAMED_FILE)
+    cache = FakeCache()
+    cache.put_source_fingerprint("ThePornDB", "OSHASH", "h", [scene(scene_id="p")])
+    porn = FakeClient(hash_error=StashDBTransientError("should not be called"))
+    report = TitleService(
+        str(tmp_path), {}, cache, FakeClient(by_hash={"h": []}),
+        oshash_func=lambda path: "h", extra_clients={"ThePornDB": porn},
+        offline=True,
+    ).preview()
+
+    assert porn.hash_calls == []
+    assert report.rows[0].scene_id == "p"
 
 
 # --- test file iteration ----------------------------------------------------

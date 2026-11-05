@@ -34,6 +34,22 @@ def test_scene_from_node_reads_all_fields():
     assert Scene.from_dict(scene.to_dict()) == scene
 
 
+def test_scene_defaults_to_stashdb_source():
+    scene = Scene(id="s1", title=None, release_date=None, date=None,
+                  code=None, duration=None)
+    assert scene.source == "StashDB"
+
+
+def test_scene_source_round_trips_through_dict():
+    scene = Scene(id="s1", title="T", release_date=None, date=None,
+                  code=None, duration=None, source="ThePornDB")
+    assert Scene.from_dict(scene.to_dict()).source == "ThePornDB"
+
+
+def test_scene_from_dict_without_source_defaults_to_stashdb():
+    assert Scene.from_dict({"id": "s1", "title": "T"}).source == "StashDB"
+
+
 def test_scene_from_node_allows_null_studio_and_alias():
     scene = scene_from_node({
         "id": "s2", "title": None, "release_date": None, "date": None,
@@ -201,6 +217,24 @@ def scene_node(hashes):
              "code": None, "duration": None, "studio": None, "performers": []},
         ])
     return data
+
+
+def test_find_scenes_by_hashes_sends_phash_algorithm():
+    calls = []
+
+    def _transport(req, timeout):
+        body = json.loads(req.data)
+        calls.append(body)
+        groups = body["variables"]["fingerprints"]
+        return json.dumps(
+            {"data": {"findScenesBySceneFingerprints": scene_node(groups)}}
+        ).encode()
+
+    client = StashDBClient("k", delay=0, transport=_transport)
+    client.find_scenes_by_hashes(["dc75c0f03795438e"], algorithm="PHASH")
+    assert calls[0]["variables"]["fingerprints"] == [
+        [{"hash": "dc75c0f03795438e", "algorithm": "PHASH"}]
+    ]
 
 
 def test_batches_40_and_keeps_order():

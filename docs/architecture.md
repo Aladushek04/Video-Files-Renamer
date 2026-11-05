@@ -231,7 +231,7 @@ approved;old;new;source;confidence;scene_id;note;oshash;size
 - `old` и `new` — пути относительно `--root`;
 - одна строка = один файл; лучший кандидат идёт в `new`/`scene_id`, остальные
   кандидаты и причина — в `note`;
-- `source`: `fingerprint`, `text`, `heuristic`, `unchanged`;
+- `source`: `fingerprint`, `phash`, `text`, `heuristic`, `unchanged`;
 - `approved`: `y` только для однозначного отпечатка с валидным итоговым именем;
   всё остальное `n`;
 - `note` — причина, кандидаты, предупреждения;
