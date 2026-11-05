@@ -16,16 +16,18 @@ preview».
 
 ## Что это
 
-Проект состоит из двух CLI и одного сервисного слоя:
+Проект состоит из четырёх CLI и одного сервисного слоя:
 
 | Файл | Назначение |
 |---|---|
 | `fix_video_titles.py` | `preview` (собрать предложения) и `apply` (применить одобренное) |
 | `scrape_studios.py` | выгружает справочник студий StashDB в `studios.json` |
+| `scrape_fansdb_studios.py` | выгружает студии FansDB в `studios_fansdb.json` |
+| `scrape_theporndb_studios.py` | выгружает студии ThePornDB в `studios_theporndb.json` |
 | `title_service.py` | сервисный слой без `print`/`argparse` — общий вход для CLI и будущего TUI |
 | `title_matcher.py` | разбор локального имени, скоринг кандидатов, сборка итогового имени |
 | `title_cache.py` | локальный SQLite-кэш ответов StashDB |
-| `stashdb_client.py` | GraphQL-клиент StashDB с ретраями |
+| `stashdb_client.py` | GraphQL-клиент stash-box (StashDB, FansDB, ThePornDB) с ретраями |
 | `oshash.py` | точный OSHASH (совместим с `stashapp/stash`) |
 | `clean_ph_names.py` | старая эвристика очистки имён — используется как fallback |
 
@@ -363,6 +365,30 @@ python scrape_studios.py [--out studios.json] [--checkpoint studios_checkpoint.j
 
 Справочник используется только для распознавания студии в имени файла и в
 эвристике; сам по себе он ничего не переименовывает.
+
+### FansDB и ThePornDB
+
+Это тоже stash-box, поэтому формат и логика те же. Ключи берутся из `.env`:
+`FANSDB_API_KEY` и `THE_PORNDB_API_KEY`.
+
+```text
+python scrape_fansdb_studios.py [--out studios_fansdb.json] [--apply] [--max-pages N]
+python scrape_theporndb_studios.py [--out studios_theporndb.json] [--apply] [--max-pages N]
+```
+
+По умолчанию каждый источник пишет свой файл, чтобы не смешивать разные базы.
+Если нужно добавить их в основной справочник, укажи тот же выход:
+
+```powershell
+python scrape_fansdb_studios.py --apply --out studios.json
+python scrape_theporndb_studios.py --apply --out studios.json
+```
+
+FansDB содержит очень много пользовательских студий (около 395 тысяч), поэтому
+полный прогон занимает около часа. Прогресс сохраняется после каждой страницы;
+для проверки используй `--max-pages 1`, для продолжения — обычный `--apply`.
+ThePornDB отдаёт тот же `queryStudios`; ключ должен быть в `.env` или в
+переменной окружения.
 
 ---
 

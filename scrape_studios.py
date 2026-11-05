@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Скрапер студий StashDB с возобновлением и безопасным merge.
+"""Скрапер студий stash-box (StashDB, FansDB, ThePornDB) с возобновлением.
 
 CLI выгружает все студии постранично, сохраняет сырой прогресс и checkpoint
 после каждой страницы (только с `--apply`), а в конце добавляет новые имена в
-`studios.json`, не перезаписывая ручные значения. Коллизии (одинаковый
-нормализованный ключ, разные написания) пишутся в `studios_collisions.json`.
+выходной JSON, не перезаписывая ручные значения. Коллизии (одинаковый
+нормализованный ключ, разные написания) пишутся в
+`<out>_collisions.json`.
 
 Без `--apply` команда работает как dry-run и не пишет ни одного файла.
 
 Коды возврата:
 
 - `0` — успех (включая намеренную остановку по `--max-pages`);
-- `1` — временный сбой StashDB/сети (прогресс предыдущих страниц сохранён);
+- `1` — временный сбой источника/сети (прогресс предыдущих страниц сохранён);
 - `2` — фатальная ошибка: нет ключа, ошибка авторизации/запроса, разрыв
   пагинации, несовпадение `per_page` с checkpoint или ошибка файлов.
 """
@@ -43,8 +44,12 @@ __all__ = [
     "DEFAULT_OUT",
     "DEFAULT_PER_PAGE",
     "DEFAULT_RAW",
+    "FANSDB_SOURCE",
+    "STASHDB_SOURCE",
+    "THEPORNDB_SOURCE",
     "ScrapeReport",
     "ScraperGapError",
+    "StudioSource",
     "fetch_studios_page",
     "load_checkpoint",
     "load_raw",
@@ -61,6 +66,50 @@ DEFAULT_CHECKPOINT = "studios_checkpoint.json"
 DEFAULT_RAW = "studios_raw.json"
 DEFAULT_PER_PAGE = 100
 DEFAULT_DELAY = 1.0
+
+
+@dataclass(frozen=True)
+class StudioSource:
+    """Описание stash-box источника студий."""
+
+    name: str
+    endpoint: str
+    api_key_env: str
+    script: str
+    default_out: str
+    default_checkpoint: str
+    default_raw: str
+
+
+STASHDB_SOURCE = StudioSource(
+    name="StashDB",
+    endpoint="https://stashdb.org/graphql",
+    api_key_env="STASHDB_API_KEY",
+    script="scrape_studios.py",
+    default_out=DEFAULT_OUT,
+    default_checkpoint=DEFAULT_CHECKPOINT,
+    default_raw=DEFAULT_RAW,
+)
+
+FANSDB_SOURCE = StudioSource(
+    name="FansDB",
+    endpoint="https://fansdb.cc/graphql",
+    api_key_env="FANSDB_API_KEY",
+    script="scrape_fansdb_studios.py",
+    default_out="studios_fansdb.json",
+    default_checkpoint="studios_fansdb_checkpoint.json",
+    default_raw="studios_fansdb_raw.json",
+)
+
+THEPORNDB_SOURCE = StudioSource(
+    name="ThePornDB",
+    endpoint="https://theporndb.net/graphql",
+    api_key_env="THE_PORNDB_API_KEY",
+    script="scrape_theporndb_studios.py",
+    default_out="studios_theporndb.json",
+    default_checkpoint="studios_theporndb_checkpoint.json",
+    default_raw="studios_theporndb_raw.json",
+)
 
 # Ключ для группировки коллизий: дополнительно к `normalize_key` убираем
 # пунктуацию. Тест плана считает `Brazzers!` коллизией с `Brazzers`
@@ -345,18 +394,25 @@ def _non_negative_float(value: str) -> float:
     return parsed
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    """Аргументы скрапера."""
+def _build_parser(
+    source: StudioSource = STASHDB_SOURCE,
+) -> argparse.ArgumentParser:
+    """Аргументы скрапера для выбранного источника."""
     parser = argparse.ArgumentParser(
-        prog="scrape_studios.py",
-        description="Scrape StashDB studios into studios.json with resume.",
+        prog=source.script,
+        description=(
+            f"Scrape {source.name} studios into {source.default_out} "
+            "with resume."
+        ),
     )
-    parser.add_argument("--out", default=DEFAULT_OUT,
-                        help="studios JSON to merge into (default: studios.json)")
-    parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT,
-                        help="checkpoint JSON (default: studios_checkpoint.json)")
-    parser.add_argument("--raw", default=DEFAULT_RAW,
-                        help="raw scraped studios (default: studios_raw.json)")
+    parser.add_argument("--out", default=source.default_out,
+                        help=f"studios JSON to merge into "
+                             f"(default: {source.default_out})")
+    parser.add_argument("--checkpoint", default=source.default_checkpoint,
+                        help=f"checkpoint JSON "
+                             f"(default: {source.default_checkpoint})")
+    parser.add_argument("--raw", default=source.default_raw,
+                        help=f"raw scraped studios (default: {source.default_raw})")
     parser.add_argument("--per-page", type=_positive_int,
                         default=DEFAULT_PER_PAGE,
                         help="studios per page (default: 100)")
@@ -405,16 +461,20 @@ def _backup_studios(path: str) -> None:
     shutil.copy2(path, path + ".bak")
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    source: StudioSource = STASHDB_SOURCE,
+) -> int:
     """Точка входа CLI; возвращает код вместо `sys.exit`."""
-    parser = _build_parser()
+    parser = _build_parser(source)
     args = parser.parse_args(argv)
 
     load_env_file()
-    api_key = os.environ.get("STASHDB_API_KEY", "").strip()
+    api_key = os.environ.get(source.api_key_env, "").strip()
     if not api_key:
         print(
-            "error: STASHDB_API_KEY is not set "
+            f"error: {source.api_key_env} is not set "
             "(checked environment and .env)",
             file=sys.stderr,
         )
@@ -516,7 +576,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"{len(accumulated)}/{count} collected"
             )
 
-        client = StashDBClient(api_key, delay=args.delay)
+        client = StashDBClient(
+            api_key, endpoint=source.endpoint, delay=args.delay
+        )
         try:
             report = run_scrape(
                 client,
@@ -528,13 +590,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         except StashDBAuthError as exc:
             print(
-                f"error: StashDB rejected the request: {exc}; "
-                f"проверь STASHDB_API_KEY",
+                f"error: {source.name} rejected the request: {exc}; "
+                f"проверь {source.api_key_env}",
                 file=sys.stderr,
             )
             return 2
         except StashDBTransientError as exc:
-            print(f"error: StashDB request failed: {exc}", file=sys.stderr)
+            print(
+                f"error: {source.name} request failed: {exc}",
+                file=sys.stderr,
+            )
             return 1
         except (StashDBError, ScraperGapError) as exc:
             print(f"error: {exc}", file=sys.stderr)

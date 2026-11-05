@@ -29,7 +29,7 @@ studios_collisions*.json
 studios.json.bak
 *.bak
 
-# --- Секреты (ключ берётся из переменной окружения, .env не читается) ---
+# --- Секреты (ключи из переменной окружения или .env) ---
 .env
 .env.*
 !.env.example

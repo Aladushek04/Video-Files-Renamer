@@ -6,6 +6,8 @@ import pytest
 import scrape_studios
 from scrape_studios import (
     Checkpoint,
+    FANSDB_SOURCE,
+    THEPORNDB_SOURCE,
     ScraperGapError,
     load_checkpoint,
     load_raw,
@@ -225,6 +227,58 @@ def test_raw_roundtrip_and_missing(tmp_path):
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
+
+def test_fansdb_source_parser_defaults():
+    args = scrape_studios._build_parser(FANSDB_SOURCE).parse_args([])
+    assert args.out == "studios_fansdb.json"
+    assert args.checkpoint == "studios_fansdb_checkpoint.json"
+    assert args.raw == "studios_fansdb_raw.json"
+
+
+def test_theporndb_source_constants():
+    assert THEPORNDB_SOURCE.endpoint == "https://theporndb.net/graphql"
+    assert THEPORNDB_SOURCE.api_key_env == "THE_PORNDB_API_KEY"
+    assert THEPORNDB_SOURCE.default_out == "studios_theporndb.json"
+
+
+def test_main_uses_source_endpoint_and_key(tmp_path, monkeypatch):
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, api_key, endpoint=None, delay=1.0):
+            seen["api_key"] = api_key
+            seen["endpoint"] = endpoint
+
+        def query_studios(self, page, per_page=100):
+            return [Studio("1", "Fans Studio")], 1
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("FANSDB_API_KEY", raising=False)
+    (tmp_path / ".env").write_text("FANSDB_API_KEY=fans-key\n",
+                                   encoding="utf-8")
+    monkeypatch.setattr(scrape_studios, "StashDBClient", FakeClient)
+
+    code = main([
+        "--out", str(tmp_path / "fans.json"),
+        "--checkpoint", str(tmp_path / "cp.json"),
+        "--raw", str(tmp_path / "raw.json"),
+        "--apply", "--max-pages", "1",
+    ], source=FANSDB_SOURCE)
+    assert code == 0
+    assert seen == {
+        "api_key": "fans-key",
+        "endpoint": "https://fansdb.cc/graphql",
+    }
+    assert "Fans Studio" in (tmp_path / "fans.json").read_text(encoding="utf-8")
+
+
+def test_main_missing_fansdb_key_returns_2(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("FANSDB_API_KEY", raising=False)
+    assert main(["--out", str(tmp_path / "fans.json")],
+                source=FANSDB_SOURCE) == 2
+    assert "FANSDB_API_KEY" in capsys.readouterr().err
+
 
 def test_main_without_key_returns_2(tmp_path, monkeypatch):
     monkeypatch.setenv("STASHDB_API_KEY", "")
