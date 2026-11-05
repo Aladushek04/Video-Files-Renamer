@@ -202,6 +202,16 @@ def _is_legacy_file(path: str) -> bool:
     return header is not None and tuple(header) == LEGACY_FIELDS
 
 
+def _refuse_unknown_header(path: str) -> None:
+    """Не дописывать строки в файл с чужим заголовком: он стал бы нечитаемым."""
+    if not os.path.isfile(path) or os.path.getsize(path) == 0:
+        return
+    with open(path, encoding="utf-8-sig", newline="") as handle:
+        header = next(csv.reader(handle, delimiter=";"), None)
+    if header is None or tuple(header) != LOG_FIELDS:
+        raise LogMigrationError(f"unknown rename log format, not appending: {path}")
+
+
 def _legacy_target(path: str) -> str:
     """Свободное имя для старого журнала: `.legacy.csv`, затем с датой и номером."""
     stem, ext = os.path.splitext(path)
@@ -232,6 +242,7 @@ def append_log(path: str, entries: Sequence[LogEntry]) -> None:
     if not entries:
         return
     _migrate_legacy(path)
+    _refuse_unknown_header(path)
     exists = os.path.isfile(path) and os.path.getsize(path) > 0
     _ensure_parent(path)
     mode = "a" if exists else "w"

@@ -12,6 +12,8 @@ import threading
 from pathlib import Path
 from typing import Callable
 
+import csv
+
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
@@ -511,12 +513,12 @@ class ConfirmUndo(ModalScreen[bool]):
 
     def __init__(self, body: str, has_legacy: bool) -> None:
         super().__init__()
-        self._body = body
+        self.body_text = body
         self._has_legacy = has_legacy
 
     def compose(self) -> ComposeResult:
         with Vertical(id="undo-dialog"):
-            yield Static(self._body, id="undo-body")
+            yield Static(self.body_text, id="undo-body")
             if self._has_legacy:
                 yield Checkbox(
                     "подтверждаю откат строк старого формата",
@@ -555,6 +557,8 @@ class UndoLogScreen(ModalScreen[None]):
         self._selected: set[str] = set()
         self._all_entries: list = []
         self._active: dict[str, object] = {}
+        self.status_message = ""
+        self.failures: list[str] = []
 
     def compose(self) -> ComposeResult:
         with Vertical(id="undo-screen"):
@@ -574,15 +578,18 @@ class UndoLogScreen(ModalScreen[None]):
         table.add_column("время", key="time")
         self._reload()
 
+    def _set_status(self, message: str) -> None:
+        self.status_message = message
+        self.query_one("#undo-status", Static).update(message)
+
     def _reload(self) -> None:
         table = self.query_one("#undo-table", DataTable)
-        status = self.query_one("#undo-status", Static)
         table.clear()
         self._active = {}
         try:
             self._all_entries = read_log(self._log_path)
-        except (OSError, ValueError) as exc:
-            status.update(f"Не удалось прочитать журнал: {exc}")
+        except (OSError, ValueError, csv.Error) as exc:
+            self._set_status(f"Не удалось прочитать журнал: {exc}")
             return
         for entry in active_renames(self._all_entries):
             self._active[entry.id] = entry
@@ -594,7 +601,7 @@ class UndoLogScreen(ModalScreen[None]):
                 entry.timestamp,
                 key=entry.id,
             )
-        status.update(f"Активных строк: {len(self._active)}")
+        self._set_status(f"Активных строк: {len(self._active)}")
 
     def _mark(self, identifier: str) -> str:
         return "[x]" if identifier in self._selected else "[ ]"
@@ -636,6 +643,8 @@ class UndoLogScreen(ModalScreen[None]):
                  for r in preview.results]
         lines += [f"пропуск: {error}" for error in selection.errors]
         body = "Откат выбранных строк (предпросмотр):\n" + "\n".join(lines)
+        if has_legacy:
+            body += f"\nКорень для строк старого формата: {self._folder}"
         self.app.push_screen(
             ConfirmUndo(body, has_legacy),
             lambda confirmed: self._undo_confirmed(confirmed, ids, has_legacy),
@@ -648,25 +657,42 @@ class UndoLogScreen(ModalScreen[None]):
 
     @work(thread=True, exclusive=True)
     def _run_undo(self, ids: list[str], has_legacy: bool) -> None:
-        entries = read_log(self._log_path)
-        selection = select_for_undo(
-            entries, ids,
-            root_override=self._folder if has_legacy else None,
-            confirm_legacy=has_legacy,
-        )
-        report = run_undo(selection, log_path=self._log_path, dry_run=False)
+        try:
+            entries = read_log(self._log_path)
+            selection = select_for_undo(
+                entries, ids,
+                root_override=self._folder if has_legacy else None,
+                confirm_legacy=has_legacy,
+            )
+            report = run_undo(selection, log_path=self._log_path, dry_run=False)
+        except Exception as exc:  # noqa: BLE001 - shown to the user, not fatal
+            self.app.call_from_thread(self._undo_failed, str(exc) or exc.__class__.__name__)
+            return
         renamed = sum(1 for r in report.results if r.status == "renamed")
-        failed = len(selection.errors) + sum(
-            1 for r in report.results if r.status != "renamed"
-        )
-        self.app.call_from_thread(self._undo_done, renamed, failed)
+        failures = [
+            f"{r.id}: {r.message or r.status}"
+            for r in report.results if r.status not in ("renamed", "dry-run")
+        ]
+        failures += [f"пропуск: {error}" for error in selection.errors]
+        self.app.call_from_thread(self._undo_done, renamed, failures)
 
-    def _undo_done(self, renamed: int, failed: int) -> None:
+    def _undo_done(self, renamed: int, failures: list[str]) -> None:
+        if not self.is_attached:
+            return
+        self.failures = failures
         self._selected.clear()
         self._reload()
-        self.query_one("#undo-status", Static).update(
-            f"Откачено: {renamed}, ошибок: {failed}"
-        )
+        message = f"Откачено: {renamed}, ошибок: {len(failures)}"
+        if failures:
+            message += "; " + "; ".join(failures[:3])
+            self.app.notify(failures[0], severity="error", timeout=10)
+        self._set_status(message)
+
+    def _undo_failed(self, message: str) -> None:
+        if not self.is_attached:
+            return
+        self._set_status(f"Откат не выполнен: {message}")
+        self.app.notify(message, severity="error", timeout=10)
 
 
 class RenamerApp(App[None]):

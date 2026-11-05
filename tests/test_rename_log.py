@@ -121,6 +121,14 @@ def test_append_aborts_when_legacy_rename_fails(tmp_path, monkeypatch):
     assert path.read_text(encoding="utf-8-sig").splitlines()[0] == LEGACY_HEADER
 
 
+def test_append_refuses_unknown_header_and_keeps_file(tmp_path):
+    path = tmp_path / "rename_log.csv"
+    path.write_text("foo;bar\n1;2\n", encoding="utf-8-sig")
+    with pytest.raises(LogMigrationError):
+        append_log(str(path), [rename_entry(root="R", old="a.mp4", new="b.mp4")])
+    assert path.read_text(encoding="utf-8-sig") == "foo;bar\n1;2\n"
+
+
 def test_append_writes_bom_only_to_new_file(tmp_path):
     path = tmp_path / "rename_log.csv"
     append_log(str(path), [rename_entry(root="R", old="a.mp4", new="b.mp4")])

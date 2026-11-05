@@ -163,6 +163,129 @@ def test_undo_confirmed_restores_file(tmp_path):
     asyncio.run(run())
 
 
+def test_undo_screen_survives_unreadable_log(tmp_path, monkeypatch):
+    import csv as csv_module
+
+    from video_renamer import tui as tui_module
+
+    def broken(path):
+        raise csv_module.Error("line too long")
+
+    monkeypatch.setattr(tui_module, "read_log", broken)
+    log = tmp_path / "rename_log.csv"
+    log.write_text("x", encoding="utf-8")
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#table")
+            await pilot.press("u")
+            await pilot.pause()
+            assert "Не удалось прочитать журнал" in app.screen.status_message
+
+    asyncio.run(run())
+
+
+def test_undo_worker_error_is_shown_not_fatal(tmp_path, monkeypatch):
+    from video_renamer import tui as tui_module
+    from video_renamer.core.undo import run_undo as real_run_undo
+
+    def failing(selection, *, log_path, dry_run, now=None):
+        if dry_run:
+            return real_run_undo(selection, log_path=log_path, dry_run=True, now=now)
+        raise RuntimeError("disk gone")
+
+    monkeypatch.setattr(tui_module, "run_undo", failing)
+    (tmp_path / "b.mp4").write_bytes(b"b" * 100)
+    log = _rename_log_with(tmp_path)
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#table")
+            await pilot.press("u")
+            await pilot.pause()
+            await pilot.click("#undo-table")
+            await pilot.press("space")
+            await pilot.click("#undo-run")
+            await pilot.pause()
+            await pilot.click("#undo-confirm")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.is_running
+            assert "Откат не выполнен: disk gone" in app.screen.status_message
+
+    asyncio.run(run())
+
+
+def test_undo_shows_unwritten_journal_rows(tmp_path, monkeypatch):
+    from video_renamer import tui as tui_module
+    from video_renamer.core.undo import UndoReport, UndoResult
+    from video_renamer.core.undo import run_undo as real_run_undo
+
+    def unwritten(selection, *, log_path, dry_run, now=None):
+        if dry_run:
+            return real_run_undo(selection, log_path=log_path, dry_run=True, now=now)
+        target = selection.targets[0].entry
+        return UndoReport((UndoResult(
+            target.id, target.new, target.old, "journal-missing",
+            "откат выполнен, журнал не записан: locked",
+        ),), True)
+
+    monkeypatch.setattr(tui_module, "run_undo", unwritten)
+    (tmp_path / "b.mp4").write_bytes(b"b" * 100)
+    log = _rename_log_with(tmp_path)
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#table")
+            await pilot.press("u")
+            await pilot.pause()
+            await pilot.click("#undo-table")
+            await pilot.press("space")
+            await pilot.click("#undo-run")
+            await pilot.pause()
+            await pilot.click("#undo-confirm")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert "журнал не записан" in app.screen.status_message
+
+    asyncio.run(run())
+
+
+def test_undo_screen_ignores_callbacks_after_close(tmp_path):
+    from video_renamer.tui import UndoLogScreen
+
+    screen = UndoLogScreen(str(tmp_path / "x.csv"), str(tmp_path))
+    screen._undo_done(1, [])
+    screen._undo_failed("late error")
+
+
+def test_legacy_confirm_shows_root_folder(tmp_path):
+    (tmp_path / "b.mp4").write_bytes(b"b" * 100)
+    legacy = tmp_path / "rename_log.csv"
+    legacy.write_text(
+        "timestamp;old;new;oshash;scene_id;source\n"
+        f"2026-11-04T12:00:00Z;a.mp4;b.mp4;{oshash_from_path(str(tmp_path / 'b.mp4'))};s;fingerprint\n",
+        encoding="utf-8-sig",
+    )
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(legacy))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#table")
+            await pilot.press("u")
+            await pilot.pause()
+            await pilot.click("#undo-table")
+            await pilot.press("space")
+            await pilot.click("#undo-run")
+            await pilot.pause()
+            assert str(tmp_path) in app.screen.body_text
+
+    asyncio.run(run())
+
+
 def test_app_apply_modal_runs_fake_apply(tmp_path):
     from video_renamer.core.title_service import ApplyReport
 
