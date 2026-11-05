@@ -25,16 +25,20 @@ from textual.widgets import (
     Footer,
     Header,
     Input,
+    OptionList,
     ProgressBar,
+    RichLog,
     Select,
     Static,
 )
+from textual.widgets.option_list import Option
 
 from video_renamer.core.clean_ph_names import load_studios
 from video_renamer.core.env_file import load_env_file
 from video_renamer.cli import append_rename_log
-from video_renamer.core.stashdb_client import StashDBClient
+from video_renamer.core.stashdb_client import Scene, StashDBClient
 from video_renamer.core.title_cache import TitleCache
+from video_renamer.core.title_matcher import is_valid_final_stem
 from video_renamer.core.title_service import (
     ApplyReport,
     PreviewReport,
@@ -42,6 +46,7 @@ from video_renamer.core.title_service import (
     ProgressEvent,
     TitleService,
 )
+from video_renamer.studio_tasks import run as run_studio_task
 from video_renamer.tui_model import FILTERS, ReviewModel
 
 SOURCE_LABELS = {
@@ -188,6 +193,229 @@ class ApplyResultModal(ModalScreen[None]):
         self.dismiss(None)
 
 
+class CandidatePicker(ModalScreen[Scene | None]):
+    """Выбор альтернативной сцены из `PreviewRow.candidates`."""
+
+    BINDINGS = [Binding("escape", "cancel", "Отмена")]
+
+    def __init__(self, row: PreviewRow) -> None:
+        super().__init__()
+        self.row = row
+
+    def compose(self) -> ComposeResult:
+        options: list[Option] = []
+        seen: set[str] = set()
+        for scene in self.row.candidates:
+            if scene.id in seen:
+                continue
+            seen.add(scene.id)
+            title = scene.title or "(без названия)"
+            studio = scene.studio.name if scene.studio else "—"
+            date = scene.release_date or scene.date or "—"
+            performers = ", ".join(
+                performer.display_name for performer in scene.performers
+            ) or "—"
+            label = Text(
+                f"{title} — {studio} · {date} · {performers}",
+                overflow="ellipsis",
+                no_wrap=True,
+            )
+            options.append(Option(label, id=scene.id))
+
+        with Vertical(id="candidate-dialog"):
+            yield Static("Альтернативные кандидаты", classes="modal-title")
+            yield Static(
+                "Выберите сцену — имя и дата будут взяты из её метаданных.",
+                classes="modal-hint",
+            )
+            if options:
+                yield OptionList(*options, id="candidate-list")
+            else:
+                yield Static("Кандидатов нет.", classes="modal-body")
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Отмена", id="candidate-cancel")
+
+    def on_option_list_option_selected(
+        self, event: OptionList.OptionSelected
+    ) -> None:
+        scene = next(
+            (item for item in self.row.candidates
+             if item.id == event.option_id),
+            None,
+        )
+        self.dismiss(scene)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "candidate-cancel":
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class NameEditor(ModalScreen[str | None]):
+    """Ручное редактирование имени файла."""
+
+    BINDINGS = [Binding("escape", "cancel", "Отмена")]
+
+    def __init__(self, row: PreviewRow) -> None:
+        super().__init__()
+        self.row = row
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="name-dialog"):
+            yield Static("Новое имя файла", classes="modal-title")
+            yield Static(
+                "Можно менять только имя, папка и расширение сохраняются.",
+                classes="modal-hint",
+            )
+            yield Input(
+                value=os.path.basename(self.row.new_rel),
+                id="new-name",
+            )
+            yield Static("", id="name-error")
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Отмена", id="name-cancel")
+                yield Button("Сохранить", id="name-save", variant="primary")
+
+    def _save(self) -> None:
+        value = self.query_one("#new-name", Input).value.strip()
+        error = self.query_one("#name-error", Static)
+        suffix = os.path.splitext(self.row.old_rel)[1]
+        if not value:
+            error.update(Text("Имя не может быть пустым.", style="#f87171"))
+            return
+        if "/" in value or "\\" in value:
+            error.update(Text("Подпапки запрещены.", style="#f87171"))
+            return
+        if os.path.splitext(value)[1] != suffix:
+            error.update(
+                Text(f"Расширение должно остаться {suffix}.", style="#f87171")
+            )
+            return
+        if len(value) > 255 or not is_valid_final_stem(
+            os.path.splitext(value)[0]
+        ):
+            error.update(Text("Недопустимое имя для Windows.", style="#f87171"))
+            return
+        self.dismiss(value)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "new-name":
+            self._save()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "name-save":
+            self._save()
+        elif event.button.id == "name-cancel":
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class StudioDialog(ModalScreen[None]):
+    """Запуск скраперов студий и слияния справочников."""
+
+    BINDINGS = [Binding("escape", "close", "Закрыть")]
+
+    TASKS = {
+        "studio-stashdb": "stashdb",
+        "studio-fansdb": "fansdb",
+        "studio-theporndb": "theporndb",
+        "studio-merge": "merge",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._studio_running = False
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="studio-dialog"):
+            yield Static("Справочник студий", classes="modal-title")
+            yield Static(
+                "StashDB — около 5 минут. FansDB — около часа. "
+                "ThePornDB может занять несколько часов. "
+                "Прогресс сохраняется, окно закрывать нельзя до конца.",
+                classes="modal-hint",
+            )
+            with Horizontal(classes="studio-buttons"):
+                yield Button("StashDB", id="studio-stashdb")
+                yield Button("FansDB", id="studio-fansdb")
+                yield Button("ThePornDB", id="studio-theporndb")
+                yield Button("Слить всё", id="studio-merge",
+                             variant="primary")
+            yield RichLog(id="studio-log", wrap=True)
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Закрыть", id="studio-close")
+
+    def _set_buttons_disabled(self, disabled: bool) -> None:
+        for button in self.query(".studio-buttons Button"):
+            button.disabled = disabled
+        self.query_one("#studio-close", Button).disabled = disabled
+
+    def _start(self, kind: str) -> None:
+        if self._studio_running:
+            return
+        self._studio_running = True
+        self._set_buttons_disabled(True)
+        log = self.query_one("#studio-log", RichLog)
+        log.clear()
+        log.write(Text(f"Запуск: {kind}...", style="bold #38bdf8"))
+        self._run_worker(kind)
+
+    @work(thread=True, exclusive=True)
+    def _run_worker(self, kind: str) -> None:
+        try:
+            code = run_studio_task(
+                kind,
+                lambda line: self.app.call_from_thread(self._append_log, line),
+            )
+        except Exception as exc:  # noqa: BLE001 - shown in the log
+            self.app.call_from_thread(self._finished, kind, 2, str(exc))
+            return
+        self.app.call_from_thread(self._finished, kind, code, "")
+
+    def _append_log(self, line: str) -> None:
+        try:
+            self.query_one("#studio-log", RichLog).write(Text(line))
+        except Exception:
+            pass
+
+    def _finished(self, kind: str, code: int, error: str) -> None:
+        self._studio_running = False
+        self._set_buttons_disabled(False)
+        log = self.query_one("#studio-log", RichLog)
+        if error:
+            log.write(Text(f"Ошибка: {error}", style="#f87171"))
+        else:
+            style = "#34d399" if code == 0 else "#f87171"
+            log.write(Text(f"Готово: код {code}", style=style))
+        app = self.app
+        app.invalidate_services()
+        app._update_environment()
+        app.notify(
+            f"Студии: {kind} завершён" if code == 0 else f"Студии: ошибка ({code})",
+            severity="information" if code == 0 else "error",
+            timeout=6,
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id
+        if button_id == "studio-close":
+            self.action_close()
+            return
+        kind = self.TASKS.get(button_id or "")
+        if kind:
+            self._start(kind)
+
+    def action_close(self) -> None:
+        if self._studio_running:
+            self.notify("Дождитесь завершения операции", severity="warning")
+            return
+        self.dismiss(None)
+
+
 class RenamerApp(App[None]):
     """Главный экран: папка, preview и таблица ручного ревью."""
 
@@ -200,6 +428,9 @@ class RenamerApp(App[None]):
         Binding("b", "browse", "Папка"),
         Binding("space", "toggle", "Одобрить"),
         Binding("a", "apply", "Применить"),
+        Binding("c", "candidates", "Кандидаты"),
+        Binding("e", "edit", "Имя"),
+        Binding("s", "studios", "Студии"),
     ]
 
     def __init__(
@@ -216,6 +447,7 @@ class RenamerApp(App[None]):
         self._apply_factory = apply_factory
         self._busy = False
         self.key = ""
+        self._service: TitleService | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -231,6 +463,7 @@ class RenamerApp(App[None]):
                 with Horizontal(id="sidebar-actions"):
                     yield Button("Выбрать", id="browse")
                     yield Button("Preview", id="preview", variant="primary")
+                yield Button("Студии", id="studios", classes="wide")
                 yield Static("", id="api-status", classes="status")
                 yield Static("", id="db-status", classes="status")
                 yield Static("", id="stats", classes="stats")
@@ -243,6 +476,8 @@ class RenamerApp(App[None]):
                         allow_blank=False,
                         id="filter",
                     )
+                    yield Button("Кандидаты", id="candidates")
+                    yield Button("Имя", id="edit")
                     yield Button("Одобрить", id="approve", variant="success")
                     yield Button("Снять", id="reject", variant="warning")
                     yield Button("Применить", id="apply", variant="error")
@@ -290,7 +525,9 @@ class RenamerApp(App[None]):
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy
         self.query_one("#preview", Button).disabled = busy
+        self.query_one("#studios", Button).disabled = busy
         self.query_one("#apply", Button).disabled = busy or not self.model.approved_rows()
+        self._update_action_state()
         progress = self.query_one("#progress", ProgressBar)
         if busy:
             progress.remove_class("hidden")
@@ -323,6 +560,15 @@ class RenamerApp(App[None]):
         self.query_one("#apply", Button).disabled = (
             self._busy or not self.model.approved_rows()
         )
+        self._update_action_state()
+
+    def _update_action_state(self) -> None:
+        index = self._selected_index()
+        row = self.model.rows[index] if index is not None else None
+        self.query_one("#edit", Button).disabled = self._busy or row is None
+        self.query_one("#candidates", Button).disabled = (
+            self._busy or row is None or not bool(row.candidates)
+        )
 
     def _update_detail(self, index: int) -> None:
         row = self.model.rows[index]
@@ -340,7 +586,13 @@ class RenamerApp(App[None]):
         if row.note:
             detail.append("Заметка: ", style="bold #94a3b8")
             detail.append(row.note)
+        if row.candidates:
+            detail.append(
+                f"\nКандидатов: {len(row.candidates)} — клавиша c",
+                style="dim #67e8f9",
+            )
         self.query_one("#detail", Static).update(detail)
+        self._update_action_state()
 
     def _refresh_table(self) -> None:
         table = self.query_one("#table", DataTable)
@@ -383,6 +635,26 @@ class RenamerApp(App[None]):
         except Exception:
             return None
         return int(cell.row_key.value)
+
+    def _get_service(self) -> TitleService:
+        if self._service is not None:
+            return self._service
+        studios_path = Path("data/studios.json")
+        studios = load_studios(str(studios_path)) if studios_path.exists() else {}
+        self._service = TitleService(self.model.folder, studios, None, None)
+        return self._service
+
+    def invalidate_services(self) -> None:
+        """Сбрасывает справочник после обновления студий."""
+        self._service = None
+
+    def _select_index(self, target: int) -> None:
+        table = self.query_one("#table", DataTable)
+        for position, (index, _row) in enumerate(self.model.visible()):
+            if index == target:
+                table.move_cursor(row=position)
+                self._update_detail(target)
+                return
 
     def _set_folder(self, folder: str) -> None:
         folder = folder.strip().strip('"')
@@ -439,6 +711,7 @@ class RenamerApp(App[None]):
                 offline=not bool(self.key),
                 progress=progress,
             )
+            self._service = service
             return service.preview()
         finally:
             cache.close()
@@ -488,6 +761,60 @@ class RenamerApp(App[None]):
             table.update_cell(str(index), "approved", _approved_text(updated.approved))
             self._update_detail(index)
             self._update_stats()
+
+    def action_studios(self) -> None:
+        if self._busy:
+            return
+        self.push_screen(StudioDialog())
+
+    def action_candidates(self) -> None:
+        index = self._selected_index()
+        if index is None:
+            return
+        row = self.model.rows[index]
+        if not row.candidates:
+            self.notify("У этой строки нет альтернативных кандидатов",
+                        severity="warning")
+            return
+        self.push_screen(
+            CandidatePicker(row),
+            lambda scene: self._candidate_picked(index, scene),
+        )
+
+    def _candidate_picked(self, index: int, scene: Scene | None) -> None:
+        if scene is None:
+            return
+        try:
+            updated = self._get_service().build_alternative(
+                self.model.rows[index], scene, self.model.rows
+            )
+        except Exception as exc:  # noqa: BLE001 - shown to the user
+            self.notify(f"Не удалось собрать имя: {exc}", severity="error")
+            return
+        self.model.set_row(index, updated)
+        self._refresh_table()
+        self._select_index(index)
+        self.notify("Кандидат выбран; проверьте имя", timeout=4)
+
+    def action_edit(self) -> None:
+        index = self._selected_index()
+        if index is None:
+            return
+        self.push_screen(
+            NameEditor(self.model.rows[index]),
+            lambda value: self._name_edited(index, value),
+        )
+
+    def _name_edited(self, index: int, value: str | None) -> None:
+        if not value:
+            return
+        row = self.model.rows[index]
+        parent = os.path.dirname(row.old_rel)
+        new_rel = os.path.join(parent, value) if parent else value
+        self.model.set_new_rel(index, new_rel, approved=True)
+        self._refresh_table()
+        self._select_index(index)
+        self.notify("Имя изменено вручную", timeout=4)
 
     def action_approve(self) -> None:
         index = self._selected_index()
@@ -589,6 +916,12 @@ class RenamerApp(App[None]):
             self.action_browse()
         elif button_id == "preview":
             self.action_preview()
+        elif button_id == "studios":
+            self.action_studios()
+        elif button_id == "candidates":
+            self.action_candidates()
+        elif button_id == "edit":
+            self.action_edit()
         elif button_id == "approve":
             self.action_approve()
         elif button_id == "reject":

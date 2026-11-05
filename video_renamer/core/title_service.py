@@ -25,7 +25,7 @@ import ntpath
 import os
 import stat
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from uuid import uuid4
 
 from video_renamer.core.clean_ph_names import _cap_length
@@ -35,6 +35,7 @@ from video_renamer.core.title_cache import TitleCache
 from video_renamer.core.title_matcher import (
     LocalNameInfo,
     MatchResult,
+    build_scene_stem,
     is_valid_final_stem,
     normalize_for_match,
     parse_local_name,
@@ -72,6 +73,7 @@ class PreviewRow:
     note: str
     oshash: str
     size: int
+    candidates: tuple[Scene, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -308,6 +310,69 @@ class TitleService:
         return self._root
 
     # --- preview ---------------------------------------------------------
+
+    def build_alternative(
+        self,
+        row: PreviewRow,
+        scene: Scene,
+        rows: Sequence[PreviewRow],
+    ) -> PreviewRow:
+        """Собирает строку для вручную выбранного кандидата.
+
+        Имя строится тем же `build_scene_stem`, что и обычное совпадение;
+        коллизии с другими строками и файлами разрешаются суффиксом ` (n)`.
+        Выбранный вручную кандидат сразу одобряется — человек уже сделал выбор.
+        """
+        suffix = os.path.splitext(row.old_rel)[1]
+        local = parse_local_name(row.old_rel, self._studios)
+        stem = build_scene_stem(scene, local, self._studios)
+        name = _cap_length(stem, suffix)
+        final_stem = self._stem(name, suffix)
+        if not is_valid_final_stem(final_stem):
+            raise ValueError("alternative name is invalid")
+
+        parent = os.path.dirname(row.old_rel)
+        desired = self._relative(parent, name)
+        used = {
+            os.path.normcase(other.new_rel)
+            for other in rows
+            if other.old_rel != row.old_rel
+        }
+        moving = {
+            os.path.normcase(other.old_rel)
+            for other in rows
+            if other.old_rel != row.old_rel
+            and other.new_rel != other.old_rel
+        }
+        number = 1
+        while True:
+            key = os.path.normcase(desired)
+            occupied = key in used
+            if not occupied:
+                full = os.path.join(self._root, desired)
+                occupied = os.path.lexists(full) and key not in moving
+            if not occupied:
+                break
+            number += 1
+            name = _collision_name(stem, suffix, number)
+            final_stem = self._stem(name, suffix)
+            if not is_valid_final_stem(final_stem):
+                raise ValueError("alternative name is invalid")
+            desired = self._relative(parent, name)
+
+        note = f"выбран кандидат: {scene.title or scene.id}"
+        if number > 1:
+            note = _join_note(note, f"collision: ({number})")
+        return replace(
+            row,
+            new_rel=desired,
+            source="text",
+            confidence=0.0,
+            scene_id=scene.id,
+            note=note,
+            approved=True,
+            candidates=row.candidates,
+        )
 
     def preview(self) -> PreviewReport:
         """Строит предпросмотр, ничего не изменяя на диске."""
@@ -905,6 +970,7 @@ class TitleService:
                 note=note,
                 oshash=candidate.oshash,
                 size=candidate.size,
+                candidates=item.match.candidates,
             ))
         return rows
 

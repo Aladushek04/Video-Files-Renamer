@@ -170,7 +170,10 @@ ModalScreen {
 
 #picker-dialog,
 #confirm-dialog,
-#result-dialog {
+#result-dialog,
+#candidate-dialog,
+#name-dialog,
+#studio-dialog {
     width: 72;
     height: 80%;
     background: #0f172a;
@@ -179,8 +182,47 @@ ModalScreen {
 }
 
 #confirm-dialog,
+#name-dialog,
 #result-dialog {
     height: auto;
+}
+
+#studio-dialog,
+#candidate-dialog {
+    width: 90%;
+}
+
+#studio-log {
+    height: 1fr;
+    background: #0b1020;
+    border: round #1e293b;
+    margin-top: 1;
+}
+
+#candidate-list {
+    height: 1fr;
+    background: #0b1020;
+    border: round #1e293b;
+    margin-top: 1;
+}
+
+.studio-buttons {
+    height: 3;
+    margin-top: 1;
+}
+
+.studio-buttons Button {
+    margin-right: 1;
+}
+
+#name-error {
+    height: 1;
+    color: #f87171;
+}
+
+#studios {
+    width: 100%;
+    margin-top: 1;
 }
 
 .modal-title {

@@ -64,6 +64,30 @@ class ReviewModel:
         self.rows[index] = row
         return row
 
+    def set_row(self, index: int, row: PreviewRow) -> PreviewRow:
+        self.rows[index] = row
+        return row
+
+    def set_new_rel(
+        self,
+        index: int,
+        new_rel: str,
+        *,
+        approved: bool | None = None,
+    ) -> PreviewRow:
+        row = self.rows[index]
+        if new_rel == row.old_rel:
+            updated = replace(row, new_rel=new_rel, source="unchanged",
+                              approved=False)
+        else:
+            updated = replace(
+                row,
+                new_rel=new_rel,
+                approved=row.approved if approved is None else approved,
+            )
+        self.rows[index] = updated
+        return updated
+
     def approved_rows(self) -> list[PreviewRow]:
         return [row for row in self.rows if row.approved]
 

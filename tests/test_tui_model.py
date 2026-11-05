@@ -24,6 +24,25 @@ def test_filter_and_toggle():
     assert model.approved_rows()[0].old_rel == "old.mp4"
 
 
+def test_set_new_rel_can_approve_and_distinguish_unchanged():
+    model = ReviewModel("D:/Videos", [row("heuristic", False)])
+    updated = model.set_new_rel(0, "Custom.mp4", approved=True)
+    assert updated.new_rel == "Custom.mp4"
+    assert updated.approved is True
+    assert updated.source == "heuristic"
+
+    unchanged = model.set_new_rel(0, "old.mp4")
+    assert unchanged.source == "unchanged"
+    assert unchanged.approved is False
+
+
+def test_set_row_replaces_manual_choice():
+    model = ReviewModel("D:/Videos", [row("text", False)])
+    replacement = row("text", True, new="Chosen.mp4")
+    assert model.set_row(0, replacement) == replacement
+    assert model.rows[0].new_rel == "Chosen.mp4"
+
+
 def test_stats_counts_sources_and_approvals():
     model = ReviewModel("D:/Videos", [
         row("fingerprint", True),

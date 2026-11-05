@@ -293,6 +293,22 @@ def test_text_search_is_used_when_fingerprint_is_empty(tmp_path):
     assert row.scene_id == "s1"
 
 
+def test_build_alternative_uses_scene_and_approves(tmp_path):
+    (tmp_path / "old.mp4").write_bytes(b"abc")
+    service = TitleService(str(tmp_path), {}, None, None)
+    row = PreviewRow(
+        False, "old.mp4", "old.mp4", "heuristic", 0.0, "", "no match", "h", 3
+    )
+    alternative = scene(title="New Title", scene_id="alt")
+    updated = service.build_alternative(row, alternative, [row])
+    assert updated.scene_id == "alt"
+    assert updated.new_rel == (
+        "BrazzersExxtra - 03.10.2026 - Ryan Reid - New Title.mp4"
+    )
+    assert updated.approved is True
+    assert updated.source == "text"
+
+
 def test_offline_text_search_uses_cache_without_network(tmp_path):
     name = "ryan reid poking glory.mp4"
     write(tmp_path / name)
