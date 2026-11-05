@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "video-files-renamer"
+version = "0.1.0"
+description = "Локальный исправлятор имён видео с поиском сцен в StashDB, FansDB и ThePornDB"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Aladushek04" }]
+license = { text = "MIT" }
+keywords = ["video", "renamer", "metadata", "stashdb", "fansdb", "theporndb"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Environment :: Console",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Video",
+]
+
+[project.optional-dependencies]
+tui = ["textual>=8.2,<9"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+video-renamer = "video_renamer.cli:main"
+video-renamer-tui = "video_renamer.tui:main"
+scrape-stashdb = "video_renamer.scrapers.stashdb:main"
+scrape-fansdb = "video_renamer.scrapers.fansdb:main"
+scrape-theporndb = "video_renamer.scrapers.theporndb:main"
+merge-studios = "video_renamer.merge_studios:main"
+
+[tool.setuptools.packages.find]
+include = ["video_renamer*"]
+
+[tool.setuptools.package-data]
+video_renamer = ["tui.tcss"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

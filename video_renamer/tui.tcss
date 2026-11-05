@@ -1,0 +1,222 @@
+Screen {
+    background: #0b1020;
+    color: #dbeafe;
+}
+
+Header {
+    background: #0f172a;
+    color: #7dd3fc;
+}
+
+Footer {
+    background: #0f172a;
+    color: #94a3b8;
+}
+
+#body {
+    height: 1fr;
+}
+
+#sidebar {
+    width: 40;
+    background: #0f172a;
+    border: round #1e293b;
+    padding: 1 2;
+}
+
+#brand {
+    height: 3;
+    color: #38bdf8;
+    text-style: bold;
+    content-align: center middle;
+}
+
+.field-label {
+    color: #94a3b8;
+    margin-top: 1;
+}
+
+#folder {
+    background: #111c33;
+    color: #e2e8f0;
+    border: tall #1e3a5f;
+}
+
+#sidebar-actions {
+    height: 3;
+    margin-top: 1;
+}
+
+#sidebar-actions Button {
+    width: 1fr;
+}
+
+.status {
+    color: #94a3b8;
+    margin-top: 1;
+}
+
+.stats {
+    color: #cbd5e1;
+    margin-top: 2;
+    height: 7;
+}
+
+#main {
+    padding: 1 2;
+}
+
+#toolbar {
+    height: 3;
+    align-vertical: middle;
+}
+
+#filter {
+    width: 24;
+    background: #111c33;
+    border: tall #1e3a5f;
+}
+
+#toolbar Button {
+    margin-left: 1;
+}
+
+DataTable {
+    height: 1fr;
+    background: #0f172a;
+    border: round #1e293b;
+}
+
+DataTable > .datatable--header {
+    background: #1e293b;
+    color: #7dd3fc;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: #164e63;
+}
+
+#detail {
+    height: 7;
+    border: round #1e293b;
+    background: #0f172a;
+    padding: 1 2;
+    margin-top: 1;
+}
+
+#progress {
+    margin-top: 1;
+}
+
+.hidden {
+    display: none;
+}
+
+Button {
+    background: #1e293b;
+    color: #dbeafe;
+    border: tall #334155;
+}
+
+Button:hover {
+    background: #334155;
+}
+
+Button.-primary {
+    background: #0369a1;
+    color: white;
+}
+
+Button.-primary:hover {
+    background: #0284c7;
+}
+
+Button.-success {
+    background: #047857;
+    color: white;
+}
+
+Button.-success:hover {
+    background: #059669;
+}
+
+Button.-warning {
+    background: #b45309;
+    color: white;
+}
+
+Button.-warning:hover {
+    background: #d97706;
+}
+
+Button.-error {
+    background: #b91c1c;
+    color: white;
+}
+
+Button.-error:hover {
+    background: #dc2626;
+}
+
+Button:disabled {
+    opacity: 0.45;
+}
+
+ModalScreen {
+    background: #000000 55%;
+    align: center middle;
+}
+
+#picker-dialog,
+#confirm-dialog,
+#result-dialog {
+    width: 72;
+    height: 80%;
+    background: #0f172a;
+    border: round #38bdf8;
+    padding: 1 2;
+}
+
+#confirm-dialog,
+#result-dialog {
+    height: auto;
+}
+
+.modal-title {
+    color: #7dd3fc;
+    text-style: bold;
+    height: 3;
+    content-align: center middle;
+}
+
+.modal-hint {
+    color: #94a3b8;
+}
+
+.modal-body {
+    color: #cbd5e1;
+    margin-top: 1;
+}
+
+.modal-buttons {
+    height: 3;
+    align-horizontal: right;
+    margin-top: 1;
+}
+
+.modal-buttons Button {
+    margin-left: 1;
+}
+
+#picker-tree {
+    height: 1fr;
+    background: #0b1020;
+    border: round #1e293b;
+}
+
+#error-list {
+    height: 8;
+    border: round #7f1d1d;
+    margin-top: 1;
+}

@@ -1,4 +1,4 @@
-from clean_ph_names import (
+from video_renamer.core.clean_ph_names import (
     apply_renames,
     build_new_name,
     clean_filename,
@@ -6,6 +6,8 @@ from clean_ph_names import (
     extract_date,
     extract_studio,
     load_studios,
+    normalize_studio_key,
+    prepare_stem,
     preview_directory,
     split_actors_title,
     split_camel,
@@ -30,6 +32,10 @@ def test_strip_tech_junk_keeps_remastered():
     assert "Remastered" in strip_tech_junk("Title (Remastered) 1080p")
 
 
+def test_strip_tech_junk_after_underscore_separator():
+    assert strip_tech_junk("Title_1080p") == "Title"
+
+
 def test_unicode_stem_untouched():
     assert strip_tech_junk("Olivia del Río 1080p") == "Olivia del Río"
 
@@ -44,9 +50,48 @@ def test_extract_date_yyyy_mm_dd():
     assert d == "14.10.2023"
 
 
+def test_extract_date_compact_yymmdd():
+    rest, d = extract_date("260625 Rossavaxx Hardcore")
+    assert d == "25.06.2026"
+    assert rest == "Rossavaxx Hardcore"
+
+
+def test_extract_date_ignores_invalid_compact():
+    rest, d = extract_date("999999 Title")
+    assert d is None
+    assert rest == "999999 Title"
+
+
 def test_extract_studio_from_dict():
     studios = {"brazzersexxtra": "BrazzersExxtra"}
     studio, rest = extract_studio("brazzersexxtra ryan reid", studios)
+    assert studio == "BrazzersExxtra"
+
+
+def test_multitoken_studio_prefix():
+    studios = {"hussiepass": "HussiePass", "brazzersexxtra": "BrazzersExxtra"}
+    studio, rest = extract_studio("Hussie Pass Anastasia Shades", studios)
+    assert studio == "HussiePass" and rest == "Anastasia Shades"
+    studio, rest = extract_studio("Brazzers Exxtra Ryan Reid", studios)
+    assert studio == "BrazzersExxtra" and rest == "Ryan Reid"
+
+
+def test_extract_studio_ignores_short_keys():
+    studio, rest = extract_studio("abc Ryan Reid", {"abc": "Abc"})
+    assert studio is None and rest == "abc Ryan Reid"
+
+
+def test_normalize_studio_key_strips_separators():
+    assert normalize_studio_key("Hussie Pass.26_x-2") == "hussiepass26x2"
+
+
+def test_prepare_stem_returns_parts():
+    studios = {"brazzersexxtra": "BrazzersExxtra"}
+    rest, date, studio = prepare_stem(
+        "brazzers-exxtra 26.10.03 ryan reid poking glory", studios
+    )
+    assert rest == "ryan reid poking glory"
+    assert date == "03.10.2026"
     assert studio == "BrazzersExxtra"
 
 

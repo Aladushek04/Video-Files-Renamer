@@ -1,12 +1,50 @@
+# --- Кэши Python ---
 __pycache__/
+*.py[cod]
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 .venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# --- Локальный кэш StashDB ---
 cache/
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+
+# --- CSV-ревью и журнал переименований ---
 preview.csv
+preview*.csv
 rename_log.csv
+rename_log*.csv
+*.tmp
+
+# --- Скрапер студий ---
 studios_raw.json
+studios_raw*.json
+studios_*_raw.json
 studios_checkpoint.json
+studios_checkpoint*.json
+studios_*_checkpoint.json
 studios_collisions.json
+studios_collisions*.json
+studios_*_collisions.json
 studios.json.bak
+studios_fansdb.json
+studios_theporndb.json
+*.bak
+
+# --- Секреты (ключи из переменной окружения или .env) ---
 .env
+.env.*
+!.env.example
+
+# --- Служебное ---
 .superpowers/
+Thumbs.db
+desktop.ini
