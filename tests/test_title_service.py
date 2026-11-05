@@ -167,14 +167,18 @@ def test_secondary_scene_source_is_recorded_in_cache(tmp_path):
 def test_secondary_source_auth_error_is_warning(tmp_path):
     write(tmp_path / NAMED_FILE)
     stash = FakeClient(by_hash={"h": [scene()]})
-    porn = FakeClient(hash_error=StashDBAuthError("bad key"))
+    porn = FakeClient(hash_error=StashDBAuthError(
+        "StashDB rejected the API key (HTTP 401)"))
     report = TitleService(
         str(tmp_path), {}, FakeCache(), stash,
         oshash_func=lambda path: "h", extra_clients={"ThePornDB": porn},
     ).preview()
 
     assert report.rows[0].scene_id == "s1"
-    assert any("ThePornDB" in warning for warning in report.warnings)
+    warning = next(w for w in report.warnings if "ThePornDB" in w)
+    assert "StashDB" not in warning
+    assert "THE_PORNDB_API_KEY" in warning
+    assert "ThePornDB_error" in report.rows[0].note
     assert report.had_transient_errors is False
 
 

@@ -8,7 +8,8 @@
 Таблицы:
 
     fingerprints(hash TEXT PRIMARY KEY, scenes TEXT NOT NULL, fetched_at TEXT NOT NULL)
-        — устаревшая: однократно переносится в fingerprint_cache при открытии
+        — устаревшая: при каждом открытии переносится в fingerprint_cache
+          через INSERT OR IGNORE (существующие строки не перезаписываются)
     fingerprint_cache(source, algorithm, hash) — сцены источника по фингерпринту
     text_queries(query TEXT PRIMARY KEY, scenes TEXT NOT NULL, fetched_at TEXT NOT NULL)
     local_phash(oshash, size) — PHASH файла по содержимому, без TTL

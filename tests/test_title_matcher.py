@@ -284,6 +284,7 @@ def test_phash_single_scene_is_never_approved():
     assert result.source == "phash"
     assert result.approved is False
     assert result.note.startswith("phash")
+    assert "требует ревью" in result.note
     assert result.scene.id == "s1"
 
 

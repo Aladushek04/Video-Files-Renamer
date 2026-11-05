@@ -20,6 +20,7 @@ __all__ = [
     "PRIMARY_SOURCE_NAME",
     "build_fingerprint_clients",
     "merge_scenes",
+    "missing_secondary_keys",
 ]
 
 PRIMARY_SOURCE_NAME = "StashDB"
@@ -64,16 +65,22 @@ def merge_scenes(per_source: Sequence[Sequence[Scene]]) -> list[Scene]:
     return merged
 
 
+def missing_secondary_keys(env: Mapping[str, str]) -> list[FingerprintSource]:
+    """Вторичные источники, для которых не задан ключ, в порядке приоритета."""
+    return [
+        source for source in FINGERPRINT_SOURCES[1:]
+        if not (env.get(source.api_key_env) or "").strip()
+    ]
+
+
 def build_fingerprint_clients(
     env: Mapping[str, str], *, offline: bool
 ) -> dict[str, StashDBClient]:
     """Клиенты вторичных источников; без ключа источник пропускается.
 
-    Клиент StashDB сюда не входит: он создаётся вызывающим кодом. В офлайн-режиме
-    сеть не нужна, клиенты не создаются.
+    Клиент StashDB сюда не входит: он создаётся вызывающим кодом. Клиенты создаются
+    и в офлайн-режиме, чтобы читался кэш; сеть запрещает сервис по флагу offline.
     """
-    if offline:
-        return {}
     clients: dict[str, StashDBClient] = {}
     for source in FINGERPRINT_SOURCES[1:]:
         key = (env.get(source.api_key_env) or "").strip()

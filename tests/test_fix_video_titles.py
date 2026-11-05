@@ -210,6 +210,42 @@ def test_preview_missing_key_warns_and_goes_offline(tmp_path, monkeypatch, capsy
     assert "STASHDB_API_KEY" in capsys.readouterr().err
 
 
+def _fake_service_capturing_nothing():
+    class FakeService:
+        def __init__(self, root, studios, cache, client=None, **kwargs):
+            pass
+
+        def preview(self):
+            return PreviewReport(rows=(), warnings=(), had_transient_errors=False)
+
+    return FakeService
+
+
+def test_preview_warns_about_missing_secondary_key(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("STASHDB_API_KEY", "key")
+    monkeypatch.setenv("THE_PORNDB_API_KEY", "")
+    monkeypatch.setenv("FANSDB_API_KEY", "fans")
+    monkeypatch.setattr(fix_video_titles, "TitleService", _fake_service_capturing_nothing())
+    code = main(["preview", str(tmp_path),
+                 "--csv", str(tmp_path / "p.csv"),
+                 "--cache", str(tmp_path / "c.sqlite3")])
+    err = capsys.readouterr().err
+    assert code == 0
+    assert "THE_PORNDB_API_KEY" in err
+    assert "FANSDB_API_KEY" not in err
+
+
+def test_no_secondary_suppresses_missing_key_warning(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("STASHDB_API_KEY", "key")
+    monkeypatch.setenv("THE_PORNDB_API_KEY", "")
+    monkeypatch.setenv("FANSDB_API_KEY", "")
+    monkeypatch.setattr(fix_video_titles, "TitleService", _fake_service_capturing_nothing())
+    main(["preview", str(tmp_path), "--no-secondary",
+          "--csv", str(tmp_path / "p.csv"),
+          "--cache", str(tmp_path / "c.sqlite3")])
+    assert "THE_PORNDB_API_KEY" not in capsys.readouterr().err
+
+
 def test_preview_auth_error_exits_2_without_csv(tmp_path, monkeypatch, capsys):
     class FakeService:
         def __init__(self, *args, **kwargs):

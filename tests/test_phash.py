@@ -16,6 +16,7 @@ from video_renamer.core.phash import (
     format_phash,
     frame_times,
     phash_from_path,
+    probe_duration,
     quick_select_median,
 )
 
@@ -108,6 +109,30 @@ def test_extract_frame_accurate_seek_puts_ss_after_input():
 
     extract_frame("C:\\v.mp4", 12.5, accurate=True, ffmpeg="ffmpeg", run=fake_run)
     assert calls[0].index("-ss") > calls[0].index("-i")
+
+
+def test_extract_frame_timeout_is_phash_error():
+    def fake_run(args, **kwargs):
+        raise subprocess.TimeoutExpired(args, 1)
+
+    with pytest.raises(PhashError):
+        extract_frame("C:\\v.mp4", 1.0, accurate=False, ffmpeg="ffmpeg", run=fake_run)
+
+
+def test_probe_timeout_is_phash_error():
+    def fake_run(args, **kwargs):
+        raise subprocess.TimeoutExpired(args, 1)
+
+    with pytest.raises(PhashError):
+        probe_duration("C:\\v.mp4", "ffprobe", run=fake_run)
+
+
+def test_check_tools_timeout_is_phash_tool_error():
+    def fake_run(args, **kwargs):
+        raise subprocess.TimeoutExpired(args, 1)
+
+    with pytest.raises(PhashToolError):
+        check_phash_tools("ffmpeg", "ffprobe", run=fake_run)
 
 
 def test_extract_frame_empty_output_is_phash_error():

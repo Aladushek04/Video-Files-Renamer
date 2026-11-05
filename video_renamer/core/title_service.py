@@ -38,6 +38,7 @@ from video_renamer.core.oshash import OshashError, oshash_from_path
 from video_renamer.core.phash import PhashError, format_phash, phash_from_path
 from video_renamer.core.stashdb_client import (
     Scene,
+    StashDBAuthError,
     StashDBClient,
     StashDBError,
     StashDBTransientError,
@@ -421,13 +422,14 @@ class TitleService:
         had_transient = False
 
         candidates = self._collect(files, total, warnings)
-        oshash_failures = self._resolve_fingerprints(candidates, warnings)
-        phash_failures = (
-            self._resolve_phash(candidates, warnings) if self._phash else {}
+        oshash_failures, oshash_transient = self._resolve_fingerprints(
+            candidates, warnings
+        )
+        phash_failures, phash_transient = (
+            self._resolve_phash(candidates, warnings) if self._phash else ({}, False)
         )
         text_failed = self._resolve_text(candidates, warnings)
-        if (any(oshash_failures.values()) or any(phash_failures.values())
-                or text_failed):
+        if oshash_transient or phash_transient or text_failed:
             had_transient = True
 
         for candidate in candidates:
@@ -816,13 +818,14 @@ class TitleService:
         algorithm: str,
         digests: Sequence[str],
         warnings: list[str],
-    ) -> tuple[dict[str, list[Scene]], set[str]]:
-        """Сцены одного источника по фингерпринтам; возвращает и сбойные хэши.
+    ) -> tuple[dict[str, list[Scene]], set[str], bool]:
+        """Сцены одного источника по фингерпринтам.
 
-        Сбой StashDB (кроме фатальных ошибок) и временный сбой вторичного
-        источника — предупреждение, сбойные хэши не кэшируются. Неверный ключ
-        и ошибка запроса вторичного источника — только предупреждение.
-        Неверный ключ и ошибка запроса StashDB пробрасываются наружу.
+        Возвращает сцены, сбойные хэши (для заметки `<Имя>_error`) и признак
+        временной ошибки (для кода возврата 1). Сбойные хэши не кэшируются.
+        Неверный ключ и ошибка запроса вторичного источника — предупреждение и
+        сбойные хэши, но не временная ошибка. Неверный ключ и ошибка запроса
+        StashDB пробрасываются наружу.
         """
         resolved: dict[str, list[Scene]] = {}
         missing: list[str] = []
@@ -837,18 +840,21 @@ class TitleService:
             missing = list(digests)
 
         failed: set[str] = set()
+        transient = False
         if missing and self._source_network_allowed(client):
             try:
                 groups = client.find_scenes_by_hashes(missing, algorithm=algorithm)
             except StashDBTransientError as exc:
-                warnings.append(f"{name} {algorithm} lookup failed: {exc}")
+                warnings.append(self._source_warning(name, algorithm, exc))
                 failed = set(missing)
+                transient = True
                 for digest in missing:
                     resolved[digest] = []
             except StashDBError as exc:
                 if name == PRIMARY_SOURCE_NAME:
                     raise
-                warnings.append(f"{name} {algorithm} lookup failed: {exc}")
+                warnings.append(self._source_warning(name, algorithm, exc))
+                failed = set(missing)
                 for digest in missing:
                     resolved[digest] = []
             else:
@@ -867,14 +873,29 @@ class TitleService:
             # отрицательный результат не пишем — он не подтверждён запросом.
             for digest in missing:
                 resolved[digest] = []
-        return resolved, failed
+        return resolved, failed, transient
+
+    @staticmethod
+    def _source_warning(name: str, algorithm: str, exc: StashDBError) -> str:
+        """Текст предупреждения о сбое источника; для вторичных — без слова StashDB."""
+        if name == PRIMARY_SOURCE_NAME:
+            return f"{name} {algorithm} lookup failed: {exc}"
+        env_name = next(
+            source.api_key_env for source in FINGERPRINT_SOURCES
+            if source.name == name
+        )
+        if isinstance(exc, StashDBAuthError):
+            return f"{name} {algorithm}: ключ отклонён, проверь {env_name}"
+        if isinstance(exc, StashDBTransientError):
+            return f"{name} {algorithm}: временная ошибка сети или сервера"
+        return f"{name} {algorithm}: ошибка запроса"
 
     def _resolve_fingerprints(
         self, candidates: Sequence[_Candidate], warnings: list[str]
-    ) -> dict[str, set[str]]:
+    ) -> tuple[dict[str, set[str]], bool]:
         """Дополняет кандидатов сценами по OSHASH из всех источников.
 
-        Возвращает для каждого источника множество сбойных хэшей.
+        Возвращает сбойные хэши по каждому источнику и признак временной ошибки.
         """
         unique = list(dict.fromkeys(
             candidate.oshash for candidate in candidates if candidate.oshash
@@ -882,12 +903,14 @@ class TitleService:
         per_source: dict[str, dict[str, list[Scene]]] = {}
         failures: dict[str, set[str]] = {}
         fetched = 0
+        transient = False
         for name, client in self._fingerprint_clients():
-            resolved, failed = self._lookup_source(
+            resolved, failed, source_transient = self._lookup_source(
                 name, client, "OSHASH", unique, warnings
             )
             per_source[name] = resolved
             failures[name] = failed
+            transient = transient or source_transient
             fetched += len(failed)
 
         for candidate in candidates:
@@ -903,12 +926,15 @@ class TitleService:
             len(unique),
             f"{fetched} failed",
         )
-        return failures
+        return failures, transient
 
     def _resolve_phash(
         self, candidates: Sequence[_Candidate], warnings: list[str]
-    ) -> dict[str, set[str]]:
-        """PHASH для файлов без OSHASH-совпадения; возвращает сбойные хэши по источникам."""
+    ) -> tuple[dict[str, set[str]], bool]:
+        """PHASH для файлов без OSHASH-совпадения.
+
+        Возвращает сбойные хэши по источникам и признак временной ошибки.
+        """
         pending = [
             candidate for candidate in candidates
             if candidate.oshash and not candidate.fingerprint_scenes
@@ -924,12 +950,14 @@ class TitleService:
         ))
         per_source: dict[str, dict[str, list[Scene]]] = {}
         failures: dict[str, set[str]] = {}
+        transient = False
         for name, client in self._fingerprint_clients():
-            resolved, failed = self._lookup_source(
+            resolved, failed, source_transient = self._lookup_source(
                 name, client, "PHASH", digests, warnings
             )
             per_source[name] = resolved
             failures[name] = failed
+            transient = transient or source_transient
 
         for candidate in pending:
             if candidate.phash:
@@ -938,7 +966,7 @@ class TitleService:
                     for name in per_source
                 ])
         self._emit("phash", total, total, "")
-        return failures
+        return failures, transient
 
     def _local_phash(self, candidate: _Candidate) -> str:
         """PHASH файла из локального кэша или вычисленный; `""` при ошибке файла."""

@@ -43,6 +43,8 @@ FRAME_WIDTH = 160
 HASH_SIZE = 64
 DCT_SIZE = 8
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+PROBE_TIMEOUT_SECONDS = 30
+FRAME_TIMEOUT_SECONDS = 60
 
 
 class PhashError(ValueError):
@@ -60,13 +62,15 @@ def frame_times(duration: float) -> list[float]:
     return [offset + index * step for index in range(FRAME_COUNT)]
 
 
-def _run(args: list[str], run) -> subprocess.CompletedProcess:
-    """Запуск без оболочки; отсутствие бинарника — `PhashToolError`."""
+def _run(args: list[str], run, timeout: float) -> subprocess.CompletedProcess:
+    """Запуск без оболочки. Отсутствие бинарника — `PhashToolError`, таймаут
+    пробрасывается вызывающему коду, который решает, какая ошибка уместна."""
     try:
         return run(
             args,
             capture_output=True,
             check=False,
+            timeout=timeout,
             creationflags=_CREATE_NO_WINDOW,
         )
     except OSError as exc:
@@ -77,14 +81,9 @@ def check_phash_tools(ffmpeg: str, ffprobe: str, run=subprocess.run) -> None:
     """Проверяет, что ffmpeg и ffprobe запускаются; иначе `PhashToolError`."""
     for name, binary in (("ffmpeg", ffmpeg), ("ffprobe", ffprobe)):
         try:
-            result = run(
-                [binary, "-version"],
-                capture_output=True,
-                check=False,
-                creationflags=_CREATE_NO_WINDOW,
-            )
-        except OSError as exc:
-            raise PhashToolError(f"{name} not found or not runnable: {binary}") from exc
+            result = _run([binary, "-version"], run, PROBE_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            raise PhashToolError(f"{name} timed out: {binary}") from exc
         if result.returncode != 0:
             raise PhashToolError(f"{name} failed to run: {binary}")
 
@@ -95,7 +94,10 @@ def probe_duration(path: str, ffprobe: str, run=subprocess.run) -> float:
         ffprobe, "-v", "error", "-show_entries", "format=duration",
         "-of", "csv=p=0", path,
     ]
-    result = _run(args, run)
+    try:
+        result = _run(args, run, PROBE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise PhashError("ffprobe timed out reading duration") from exc
     if result.returncode != 0:
         raise PhashError("ffprobe failed to read duration")
     text = (result.stdout or b"").decode("utf-8", "replace").strip()
@@ -121,7 +123,10 @@ def extract_frame(path: str, t: float, *, accurate: bool, ffmpeg: str,
         "-frames:v", "1", "-vf", f"scale={FRAME_WIDTH}:-2",
         "-c:v", "bmp", "-f", "rawvideo", "-",
     ]
-    result = _run(args, run)
+    try:
+        result = _run(args, run, FRAME_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise PhashError(f"ffmpeg timed out at {t:.3f}s") from exc
     if result.returncode != 0 or not result.stdout:
         raise PhashError(f"ffmpeg returned no frame at {t:.3f}s")
     return result.stdout

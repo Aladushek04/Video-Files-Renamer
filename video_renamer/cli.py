@@ -31,7 +31,10 @@ from video_renamer.core.stashdb_client import (
     StashDBResponseError,
     StashDBTransientError,
 )
-from video_renamer.core.fingerprint_sources import build_fingerprint_clients
+from video_renamer.core.fingerprint_sources import (
+    build_fingerprint_clients,
+    missing_secondary_keys,
+)
 from video_renamer.core.phash import PhashToolError, check_phash_tools
 from video_renamer.core.title_cache import TitleCache
 from video_renamer.core.title_service import ApplyResult, PreviewRow, TitleService
@@ -325,6 +328,13 @@ def _run_preview(args: argparse.Namespace,
     secondary = {} if args.no_secondary else build_fingerprint_clients(
         os.environ, offline=offline
     )
+    if not args.no_secondary and not offline:
+        for source in missing_secondary_keys(os.environ):
+            print(
+                f"warning: {source.api_key_env} is not set; "
+                f"{source.name} is skipped",
+                file=sys.stderr,
+            )
     try:
         report = TitleService(
             args.directory,

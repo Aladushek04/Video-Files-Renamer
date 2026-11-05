@@ -506,11 +506,11 @@ def resolve_match(
         best = ordered[0]
         stem = build_scene_stem(best, local, studios)
         if len(ordered) == 1:
-            note = f"phash: {best.source} {best.id}"
+            note = f"phash: {best.source} {best.id}; требует ревью"
         else:
             note = "phash совпадения: " + ", ".join(
                 f"{scene.source} {scene.id}" for scene in ordered
-            )
+            ) + "; требует ревью"
         if not is_valid_final_stem(stem):
             stem = _heuristic_stem(local, studios)
             note += "; имя сцены неполное, heuristic fallback"
