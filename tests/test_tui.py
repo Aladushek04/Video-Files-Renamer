@@ -86,6 +86,83 @@ def test_app_previews_and_toggles_rows(tmp_path):
     asyncio.run(run())
 
 
+def _rename_log_with(tmp_path, old="a.mp4", new="b.mp4"):
+    from video_renamer.core.rename_log import LogEntry, append_log, format_log_timestamp
+
+    log = tmp_path / "rename_log.csv"
+    append_log(str(log), [LogEntry(
+        timestamp=format_log_timestamp(), action="rename", undoes="",
+        root=str(tmp_path), old=old, new=new, oshash=oshash_from_path(str(tmp_path / new)),
+        size=100, scene_id="s1", source="fingerprint", legacy=False,
+    )])
+    return log
+
+
+def test_undo_screen_lists_active_rows(tmp_path):
+    (tmp_path / "b.mp4").write_bytes(b"b" * 100)
+    log = _rename_log_with(tmp_path)
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#table")
+            await pilot.press("u")
+            await pilot.pause()
+            assert app.screen.query_one("#undo-table").row_count == 1
+
+    asyncio.run(run())
+
+
+def test_legacy_undo_needs_checkbox(tmp_path):
+    (tmp_path / "b.mp4").write_bytes(b"b" * 100)
+    legacy = tmp_path / "rename_log.csv"
+    legacy.write_text(
+        "timestamp;old;new;oshash;scene_id;source\n"
+        f"2026-11-04T12:00:00Z;a.mp4;b.mp4;{oshash_from_path(str(tmp_path / 'b.mp4'))};s;fingerprint\n",
+        encoding="utf-8-sig",
+    )
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(legacy))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#table")
+            await pilot.press("u")
+            await pilot.pause()
+            await pilot.click("#undo-table")
+            await pilot.press("space")
+            await pilot.click("#undo-run")
+            await pilot.pause()
+            assert app.screen.query_one("#undo-confirm").disabled is True
+            await pilot.click("#undo-legacy-ack")
+            await pilot.pause()
+            assert app.screen.query_one("#undo-confirm").disabled is False
+
+    asyncio.run(run())
+
+
+def test_undo_confirmed_restores_file(tmp_path):
+    (tmp_path / "b.mp4").write_bytes(b"b" * 100)
+    log = _rename_log_with(tmp_path)
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#table")
+            await pilot.press("u")
+            await pilot.pause()
+            await pilot.click("#undo-table")
+            await pilot.press("space")
+            await pilot.click("#undo-run")
+            await pilot.pause()
+            await pilot.click("#undo-confirm")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert (tmp_path / "a.mp4").exists()
+            assert not (tmp_path / "b.mp4").exists()
+
+    asyncio.run(run())
+
+
 def test_app_apply_modal_runs_fake_apply(tmp_path):
     from video_renamer.core.title_service import ApplyReport
 

@@ -20,6 +20,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
+    Checkbox,
     DataTable,
     DirectoryTree,
     Footer,
@@ -34,7 +35,12 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 from video_renamer.core.clean_ph_names import load_studios
-from video_renamer.core.rename_log import format_log_timestamp
+from video_renamer.core.rename_log import (
+    active_renames,
+    format_log_timestamp,
+    read_log,
+)
+from video_renamer.core.undo import run_undo, select_for_undo
 from video_renamer.cli import append_rename_log
 from video_renamer.core.stashdb_client import Scene, StashDBClient
 from video_renamer.core.title_cache import TitleCache
@@ -498,6 +504,171 @@ class StudioDialog(ModalScreen[None]):
         self.dismiss(None)
 
 
+class ConfirmUndo(ModalScreen[bool]):
+    """Подтверждение отката: предпросмотр и отметка для строк старого формата."""
+
+    BINDINGS = [Binding("escape", "cancel", "Отмена")]
+
+    def __init__(self, body: str, has_legacy: bool) -> None:
+        super().__init__()
+        self._body = body
+        self._has_legacy = has_legacy
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="undo-dialog"):
+            yield Static(self._body, id="undo-body")
+            if self._has_legacy:
+                yield Checkbox(
+                    "подтверждаю откат строк старого формата",
+                    id="undo-legacy-ack",
+                )
+            with Horizontal(id="undo-buttons"):
+                yield Button("Отмена", id="undo-cancel")
+                yield Button(
+                    "Откатить", id="undo-confirm", variant="success",
+                    disabled=self._has_legacy,
+                )
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        if event.checkbox.id == "undo-legacy-ack":
+            self.query_one("#undo-confirm", Button).disabled = not event.value
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "undo-confirm")
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
+class UndoLogScreen(ModalScreen[None]):
+    """Журнал: активные строки, отметки пробелом и откат выбранных."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Закрыть"),
+        Binding("space", "toggle", "Отметить"),
+    ]
+
+    def __init__(self, log_path: str, folder: str) -> None:
+        super().__init__()
+        self._log_path = log_path
+        self._folder = folder
+        self._selected: set[str] = set()
+        self._all_entries: list = []
+        self._active: dict[str, object] = {}
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="undo-screen"):
+            yield Static(f"Журнал: {self._log_path}", id="undo-title")
+            yield DataTable(id="undo-table", cursor_type="row")
+            yield Static("", id="undo-status")
+            with Horizontal(id="undo-actions"):
+                yield Button("Откатить выбранные", id="undo-run", variant="warning")
+                yield Button("Закрыть", id="undo-close")
+
+    def on_mount(self) -> None:
+        table = self.query_one("#undo-table", DataTable)
+        table.add_column("", key="mark")
+        table.add_column("id", key="id")
+        table.add_column("старое → новое", key="names")
+        table.add_column("корень", key="root")
+        table.add_column("время", key="time")
+        self._reload()
+
+    def _reload(self) -> None:
+        table = self.query_one("#undo-table", DataTable)
+        status = self.query_one("#undo-status", Static)
+        table.clear()
+        self._active = {}
+        try:
+            self._all_entries = read_log(self._log_path)
+        except (OSError, ValueError) as exc:
+            status.update(f"Не удалось прочитать журнал: {exc}")
+            return
+        for entry in active_renames(self._all_entries):
+            self._active[entry.id] = entry
+            table.add_row(
+                self._mark(entry.id),
+                entry.id,
+                f"{entry.old} → {entry.new}",
+                entry.root or "(старый формат)",
+                entry.timestamp,
+                key=entry.id,
+            )
+        status.update(f"Активных строк: {len(self._active)}")
+
+    def _mark(self, identifier: str) -> str:
+        return "[x]" if identifier in self._selected else "[ ]"
+
+    def action_toggle(self) -> None:
+        table = self.query_one("#undo-table", DataTable)
+        if table.row_count == 0:
+            return
+        row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
+        identifier = str(row_key.value)
+        if identifier in self._selected:
+            self._selected.discard(identifier)
+        else:
+            self._selected.add(identifier)
+        table.update_cell(row_key, "mark", self._mark(identifier))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "undo-run":
+            self._start_undo()
+        elif event.button.id == "undo-close":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+    def _start_undo(self) -> None:
+        if not self._selected:
+            self.app.notify("Ничего не выбрано", severity="warning")
+            return
+        ids = sorted(self._selected)
+        has_legacy = any(self._active[i].legacy for i in ids if i in self._active)
+        selection = select_for_undo(
+            self._all_entries, ids,
+            root_override=self._folder if has_legacy else None,
+            confirm_legacy=True,
+        )
+        preview = run_undo(selection, log_path=self._log_path, dry_run=True)
+        lines = [f"{r.old_rel} → {r.new_rel}: {r.status} {r.message}".rstrip()
+                 for r in preview.results]
+        lines += [f"пропуск: {error}" for error in selection.errors]
+        body = "Откат выбранных строк (предпросмотр):\n" + "\n".join(lines)
+        self.app.push_screen(
+            ConfirmUndo(body, has_legacy),
+            lambda confirmed: self._undo_confirmed(confirmed, ids, has_legacy),
+        )
+
+    def _undo_confirmed(self, confirmed: bool | None, ids: list[str],
+                        has_legacy: bool) -> None:
+        if confirmed:
+            self._run_undo(ids, has_legacy)
+
+    @work(thread=True, exclusive=True)
+    def _run_undo(self, ids: list[str], has_legacy: bool) -> None:
+        entries = read_log(self._log_path)
+        selection = select_for_undo(
+            entries, ids,
+            root_override=self._folder if has_legacy else None,
+            confirm_legacy=has_legacy,
+        )
+        report = run_undo(selection, log_path=self._log_path, dry_run=False)
+        renamed = sum(1 for r in report.results if r.status == "renamed")
+        failed = len(selection.errors) + sum(
+            1 for r in report.results if r.status != "renamed"
+        )
+        self.app.call_from_thread(self._undo_done, renamed, failed)
+
+    def _undo_done(self, renamed: int, failed: int) -> None:
+        self._selected.clear()
+        self._reload()
+        self.query_one("#undo-status", Static).update(
+            f"Откачено: {renamed}, ошибок: {failed}"
+        )
+
+
 class RenamerApp(App[None]):
     """Главный экран: папка, preview и таблица ручного ревью."""
 
@@ -515,6 +686,7 @@ class RenamerApp(App[None]):
         Binding("c", "candidates", "Кандидаты"),
         Binding("e", "edit", "Имя"),
         Binding("s", "studios", "Студии"),
+        Binding("u", "undo_log", "Журнал"),
     ]
 
     def __init__(
@@ -523,12 +695,14 @@ class RenamerApp(App[None]):
         *,
         preview_factory: Callable[[str, Callable], PreviewReport] | None = None,
         apply_factory: Callable[[list[PreviewRow]], ApplyReport] | None = None,
+        undo_log_path: str | None = None,
     ) -> None:
         super().__init__()
         self.folder = Path(folder) if folder else _default_folder()
         self.model = ReviewModel(str(self.folder), [])
         self._preview_factory = preview_factory
         self._apply_factory = apply_factory
+        self.undo_log_path = undo_log_path or str(LOG_PATH)
         self._busy = False
         self.key = ""
         self._service: TitleService | None = None
@@ -883,6 +1057,11 @@ class RenamerApp(App[None]):
             table.update_cell(str(index), "approved", _approved_text(updated.approved))
             self._update_detail(index)
             self._update_stats()
+
+    def action_undo_log(self) -> None:
+        if isinstance(self.screen, ModalScreen):
+            return
+        self.push_screen(UndoLogScreen(self.undo_log_path, str(self.model.folder)))
 
     def action_studios(self) -> None:
         if self._busy:
