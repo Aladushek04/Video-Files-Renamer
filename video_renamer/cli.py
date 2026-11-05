@@ -28,9 +28,12 @@ from video_renamer.core.rename_log import (
     LogEntry,
     _guard_formula,
     _unguard_formula,
+    active_renames,
     append_log,
     format_log_timestamp,
+    read_log,
 )
+from video_renamer.core.undo import run_undo, select_for_undo
 from video_renamer.core.stashdb_client import (
     StashDBAuthError,
     StashDBClient,
@@ -233,6 +236,23 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="add (2), (3) instead of failing on collisions")
     apply.set_defaults(handler=_run_apply)
 
+    undo = subparsers.add_parser(
+        "undo", help="list or undo applied renames from the journal"
+    )
+    undo.add_argument("--list", action="store_true",
+                      help="print active journal rows with their ids")
+    undo.add_argument("--ids", default=None,
+                      help="comma-separated ids to undo (see --list)")
+    undo.add_argument("--log", default=DEFAULT_LOG,
+                      help="rename log path (default: rename_log.csv)")
+    undo.add_argument("--root", default=None,
+                      help="folder for legacy rows without a stored root")
+    undo.add_argument("--apply", action="store_true",
+                      help="actually undo (default: dry-run)")
+    undo.add_argument("--confirm-legacy", action="store_true",
+                      help="allow undoing legacy rows (requires --root)")
+    undo.set_defaults(handler=_run_undo)
+
     return parser
 
 
@@ -380,6 +400,54 @@ def _run_apply(args: argparse.Namespace,
         f"{mode}: {renamed} renamed, {skipped} skipped, {errors} error(s)"
     )
     return 1 if (report.had_errors or errors) else 0
+
+
+def _run_undo(args: argparse.Namespace,
+              parser: argparse.ArgumentParser) -> int:
+    """Список активных строк журнала или откат выбранных; по умолчанию dry-run."""
+    if not args.list and not args.ids:
+        print("error: undo needs --list or --ids", file=sys.stderr)
+        return 2
+
+    try:
+        entries = read_log(args.log)
+    except (OSError, ValueError, csv.Error) as exc:
+        print(f"error: cannot read rename log {args.log}: {exc}", file=sys.stderr)
+        return 2
+
+    if args.list:
+        for entry in active_renames(entries):
+            origin = entry.root or "(старый формат)"
+            print(f"{entry.id}\t{entry.old} -> {entry.new}\t{origin}\t{entry.timestamp}")
+        return 0
+
+    ids = [part for part in args.ids.split(",") if part.strip()]
+    root_override = os.path.abspath(args.root) if args.root else None
+    selection = select_for_undo(
+        entries, ids,
+        root_override=root_override,
+        confirm_legacy=args.confirm_legacy,
+    )
+    for error in selection.errors:
+        print(f"error: {error}", file=sys.stderr)
+
+    report = run_undo(selection, log_path=args.log, dry_run=not args.apply)
+    undone = 0
+    failed = 0
+    for result in report.results:
+        if result.status == "renamed":
+            undone += 1
+            print(f"undone: {result.old_rel} -> {result.new_rel}")
+        elif result.status == "dry-run":
+            undone += 1
+            print(f"would undo: {result.old_rel} -> {result.new_rel}")
+        else:
+            failed += 1
+            print(f"error: {result.id}: {result.message}", file=sys.stderr)
+
+    mode = "undo" if args.apply else "undo (dry-run)"
+    print(f"{mode}: {undone} undone, {failed + len(selection.errors)} error(s)")
+    return 1 if (selection.errors or report.had_errors) else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

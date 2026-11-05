@@ -12,6 +12,7 @@ from video_renamer.cli import (
     write_preview_csv,
 )
 from video_renamer.core.oshash import oshash_from_path
+from video_renamer.core.rename_log import active_renames, read_log
 from video_renamer.core.stashdb_client import StashDBAuthError, StashDBQueryError
 from video_renamer.core.title_service import ApplyResult, PreviewReport, PreviewRow
 
@@ -338,6 +339,89 @@ def test_apply_suffix_collisions_logs_actual_target(tmp_path, capsys):
         "rename", "", str(tmp_path), "old.mp4", "new (2).mp4",
         row.oshash, str(row.size), "scene-1", "fingerprint",
     ]
+
+
+def _applied_log(tmp_path):
+    """Реальный apply a.mp4 -> b.mp4 через CLI; возвращает путь журнала."""
+    (tmp_path / "a.mp4").write_bytes(b"a" * 100)
+    row = PreviewRow(True, "a.mp4", "b.mp4", "fingerprint", 1.0, "scene-1", "",
+                     oshash_from_path(str(tmp_path / "a.mp4")), 100)
+    csv_path = tmp_path / "preview.csv"
+    write_preview_csv(str(csv_path), [row])
+    log = tmp_path / "rename_log.csv"
+    assert main(["apply", str(csv_path), "--root", str(tmp_path),
+                 "--log", str(log), "--apply"]) == 0
+    return log
+
+
+def test_cli_undo_list_prints_active_rows(tmp_path, capsys):
+    log = _applied_log(tmp_path)
+    capsys.readouterr()
+    assert main(["undo", "--list", "--log", str(log)]) == 0
+    assert "a.mp4 -> b.mp4" in capsys.readouterr().out
+
+
+def test_cli_undo_list_missing_log_is_empty(tmp_path, capsys):
+    assert main(["undo", "--list", "--log", str(tmp_path / "none.csv")]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_cli_undo_dry_run_changes_nothing(tmp_path, capsys):
+    log = _applied_log(tmp_path)
+    entry_id = read_log(str(log))[0].id
+    before = log.read_bytes()
+    capsys.readouterr()
+    assert main(["undo", "--ids", entry_id, "--log", str(log)]) == 0
+    assert (tmp_path / "b.mp4").exists()
+    assert log.read_bytes() == before
+    assert "would undo" in capsys.readouterr().out
+
+
+def test_cli_undo_apply_restores_file(tmp_path, capsys):
+    log = _applied_log(tmp_path)
+    entry_id = read_log(str(log))[0].id
+    assert main(["undo", "--ids", entry_id, "--log", str(log), "--apply"]) == 0
+    assert (tmp_path / "a.mp4").exists()
+    assert not (tmp_path / "b.mp4").exists()
+    assert active_renames(read_log(str(log))) == []
+
+
+def test_cli_undo_unknown_id_exits_1(tmp_path, capsys):
+    log = _applied_log(tmp_path)
+    capsys.readouterr()
+    assert main(["undo", "--ids", "nope", "--log", str(log), "--apply"]) == 1
+    assert "не найдена" in capsys.readouterr().err
+
+
+def test_cli_undo_legacy_requires_confirm(tmp_path, capsys):
+    (tmp_path / "b.mp4").write_bytes(b"b" * 100)
+    legacy = tmp_path / "rename_log.csv"
+    legacy.write_text(
+        "timestamp;old;new;oshash;scene_id;source\n"
+        f"2026-11-04T12:00:00Z;a.mp4;b.mp4;{oshash_from_path(str(tmp_path / 'b.mp4'))};s;fingerprint\n",
+        encoding="utf-8-sig",
+    )
+    entry_id = read_log(str(legacy))[0].id
+    capsys.readouterr()
+
+    assert main(["undo", "--ids", entry_id, "--log", str(legacy),
+                 "--root", str(tmp_path), "--apply"]) == 1
+    assert (tmp_path / "b.mp4").exists()
+    assert "--confirm-legacy" in capsys.readouterr().err
+
+    assert main(["undo", "--ids", entry_id, "--log", str(legacy),
+                 "--root", str(tmp_path), "--apply", "--confirm-legacy"]) == 0
+    assert (tmp_path / "a.mp4").exists()
+
+
+def test_cli_undo_unreadable_log_exits_2(tmp_path):
+    log = tmp_path / "rename_log.csv"
+    log.write_text("foo;bar\n1;2\n", encoding="utf-8-sig")
+    assert main(["undo", "--list", "--log", str(log)]) == 2
+
+
+def test_cli_undo_requires_list_or_ids(tmp_path):
+    assert main(["undo", "--log", str(tmp_path / "x.csv")]) == 2
 
 
 def test_apply_row_error_exits_1(tmp_path, capsys):
