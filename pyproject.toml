@@ -9,9 +9,11 @@ description = "Локальный исправлятор имён видео с 
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Aladushek04" }]
+license = { text = "MIT" }
 keywords = ["video", "renamer", "metadata", "stashdb", "fansdb", "theporndb"]
 classifiers = [
     "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
     "Environment :: Console",
     "Environment :: Win32 (MS Windows)",
     "Intended Audience :: End Users/Desktop",
