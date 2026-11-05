@@ -29,6 +29,7 @@ from typing import Any
 
 from clean_ph_names import normalize_studio_key
 from env_file import load_env_file
+from studio_filters import filter_studio_names
 from stashdb_client import (
     StashDBAuthError,
     StashDBClient,
@@ -425,6 +426,8 @@ def _build_parser(
                         help="write progress, studios.json and collision report")
     parser.add_argument("--reset", action="store_true",
                         help="ignore and (with --apply) delete checkpoint/raw")
+    parser.add_argument("--no-filter", action="store_true",
+                        help="keep generated/placeholder studio names too")
     return parser
 
 
@@ -609,6 +612,13 @@ def main(
                   file=sys.stderr)
             return 2
 
+    all_names = [studio.name for studio in report.studios]
+    if args.no_filter:
+        names_to_merge = all_names
+        filtered_count = 0
+    else:
+        names_to_merge, filtered_count = filter_studio_names(all_names)
+
     if args.apply:
         try:
             existing = _load_existing_studios(args.out)
@@ -619,9 +629,7 @@ def main(
             )
             return 2
 
-        merged, collisions = merge_studios(
-            existing, [studio.name for studio in report.studios]
-        )
+        merged, collisions = merge_studios(existing, names_to_merge)
         try:
             if os.path.exists(args.out):
                 _backup_studios(args.out)
@@ -632,13 +640,15 @@ def main(
             return 2
 
         print(
-            f"applied: {len(report.studios)} studio(s), "
+            f"applied: {len(report.studios)} scraped, "
+            f"{len(names_to_merge)} kept, {filtered_count} filtered, "
             f"{len(merged) - len(existing)} new key(s), "
             f"{sum(len(v) for v in collisions.values())} collision(s)"
         )
     else:
         print(
             f"dry-run: {len(report.studios)} studio(s), "
+            f"{len(names_to_merge)} kept, {filtered_count} filtered, "
             f"{report.pages_fetched} page(s), "
             f"next page {report.next_page}, complete={report.complete}"
         )

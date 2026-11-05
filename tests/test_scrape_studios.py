@@ -228,6 +228,50 @@ def test_raw_roundtrip_and_missing(tmp_path):
 # main
 # ---------------------------------------------------------------------------
 
+def test_main_filters_generated_names(tmp_path, monkeypatch):
+    monkeypatch.setenv("STASHDB_API_KEY", "key")
+    fake = FakeClient({
+        1: ([
+            Studio("1", "Brazzers"),
+            Studio("2", "000000h (ManyVids)"),
+            Studio("3", "+AddFriends (network)"),
+            Studio("4", "Hussie Pass"),
+        ], 4),
+    })
+    install_client(monkeypatch, fake)
+    out = tmp_path / "studios.json"
+    code = main([
+        "--out", str(out),
+        "--checkpoint", str(tmp_path / "cp.json"),
+        "--raw", str(tmp_path / "raw.json"),
+        "--per-page", "4", "--delay", "0", "--apply", "--max-pages", "1",
+    ])
+    assert code == 0
+    data = read_json(out)
+    assert data["brazzers"] == "Brazzers"
+    assert data["hussiepass"] == "Hussie Pass"
+    assert not any("000000" in value or "AddFriends" in value
+                   for value in data.values())
+
+
+def test_main_no_filter_keeps_generated_names(tmp_path, monkeypatch):
+    monkeypatch.setenv("STASHDB_API_KEY", "key")
+    fake = FakeClient({
+        1: ([Studio("1", "000000h (ManyVids)")], 1),
+    })
+    install_client(monkeypatch, fake)
+    out = tmp_path / "studios.json"
+    code = main([
+        "--out", str(out),
+        "--checkpoint", str(tmp_path / "cp.json"),
+        "--raw", str(tmp_path / "raw.json"),
+        "--per-page", "1", "--delay", "0", "--apply", "--max-pages", "1",
+        "--no-filter",
+    ])
+    assert code == 0
+    assert "000000h (ManyVids)" in read_json(out).values()
+
+
 def test_fansdb_source_parser_defaults():
     args = scrape_studios._build_parser(FANSDB_SOURCE).parse_args([])
     assert args.out == "studios_fansdb.json"
@@ -368,13 +412,13 @@ def test_main_transient_error_keeps_last_page_progress(tmp_path, monkeypatch):
 
 def test_main_resumes_from_checkpoint_and_raw(tmp_path, monkeypatch):
     monkeypatch.setenv("STASHDB_API_KEY", "key")
-    fake = FakeClient({2: ([Studio("3", "C")], 3)})
+    fake = FakeClient({2: ([Studio("3", "Gamma")], 3)})
     install_client(monkeypatch, fake)
 
     out = tmp_path / "studios.json"
     cp = tmp_path / "cp.json"
     raw = tmp_path / "raw.json"
-    save_raw(str(raw), [Studio("1", "A"), Studio("2", "B")])
+    save_raw(str(raw), [Studio("1", "Alpha"), Studio("2", "Beta")])
     save_checkpoint(str(cp), Checkpoint(1, 2, 3, False))
 
     code = main([
@@ -384,7 +428,7 @@ def test_main_resumes_from_checkpoint_and_raw(tmp_path, monkeypatch):
 
     assert code == 0
     assert fake.calls == [(2, 2)]
-    assert sorted(read_json(out)) == ["a", "b", "c"]
+    assert sorted(read_json(out)) == ["alpha", "beta", "gamma"]
     assert [s.id for s in load_raw(str(raw))] == ["1", "2", "3"]
     assert load_checkpoint(str(cp)) == Checkpoint(2, 2, 3, True)
 
@@ -489,7 +533,7 @@ def test_main_per_page_mismatch_requires_reset(tmp_path, monkeypatch, capsys):
 
 def test_main_reset_with_apply_starts_at_page_one(tmp_path, monkeypatch):
     monkeypatch.setenv("STASHDB_API_KEY", "key")
-    fake = FakeClient({1: ([Studio("1", "A")], 1)})
+    fake = FakeClient({1: ([Studio("1", "Alpha")], 1)})
     install_client(monkeypatch, fake)
 
     out = tmp_path / "studios.json"
@@ -507,7 +551,7 @@ def test_main_reset_with_apply_starts_at_page_one(tmp_path, monkeypatch):
     assert fake.calls == [(1, 2)]
     assert [s.id for s in load_raw(str(raw))] == ["1"]
     assert load_checkpoint(str(cp)) == Checkpoint(1, 2, 1, True)
-    assert read_json(out) == {"a": "A"}
+    assert read_json(out) == {"alpha": "Alpha"}
 
 
 def test_main_reset_without_apply_is_read_only(tmp_path, monkeypatch):
@@ -542,7 +586,7 @@ def test_main_complete_checkpoint_skips_network_and_merges_raw(
     out = tmp_path / "studios.json"
     cp = tmp_path / "cp.json"
     raw = tmp_path / "raw.json"
-    save_raw(str(raw), [Studio("1", "A")])
+    save_raw(str(raw), [Studio("1", "Alpha")])
     save_checkpoint(str(cp), Checkpoint(1, 2, 1, True))
 
     code = main([
@@ -552,7 +596,7 @@ def test_main_complete_checkpoint_skips_network_and_merges_raw(
 
     assert code == 0
     assert fake.calls == []
-    assert read_json(out) == {"a": "A"}
+    assert read_json(out) == {"alpha": "Alpha"}
 
 
 def test_main_auth_error_returns_2_without_writes(tmp_path, monkeypatch):
@@ -618,7 +662,7 @@ def test_main_gap_does_not_advance_checkpoint(tmp_path, monkeypatch):
 
 def test_main_max_pages_applies_partial_progress(tmp_path, monkeypatch):
     monkeypatch.setenv("STASHDB_API_KEY", "key")
-    fake = FakeClient({1: ([Studio("1", "A")], 3)})
+    fake = FakeClient({1: ([Studio("1", "Alpha")], 3)})
     install_client(monkeypatch, fake)
 
     out = tmp_path / "studios.json"
@@ -632,7 +676,7 @@ def test_main_max_pages_applies_partial_progress(tmp_path, monkeypatch):
     assert code == 0
     assert fake.calls == [(1, 2)]
     assert load_checkpoint(str(cp)) == Checkpoint(1, 2, 3, False)
-    assert read_json(out) == {"a": "A"}
+    assert read_json(out) == {"alpha": "Alpha"}
 
 
 def test_main_reset_delete_error_returns_2(tmp_path, monkeypatch, capsys):
