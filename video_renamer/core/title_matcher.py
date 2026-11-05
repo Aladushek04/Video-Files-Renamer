@@ -440,13 +440,15 @@ def resolve_match(
     studios: dict[str, str],
     fingerprint_scenes: Sequence[Scene],
     text_scenes: Sequence[Scene],
+    phash_scenes: Sequence[Scene] = (),
 ) -> MatchResult:
     """Выбирает сцену, собирает итоговый stem и решает, можно ли одобрить.
 
     Уникальный fingerprint одобряется автоматически только при валидном
     итоговом stem и содержательном имени (название или два других блока).
-    Текстовое совпадение используется при `score >= 0.60` и пройденном
-    guard, но никогда не одобряется автоматически.
+    PHASH-совпадение всегда требует ревью. Текстовое совпадение используется
+    при `score >= 0.60` и пройденном guard, но никогда не одобряется
+    автоматически.
     """
     if len(fingerprint_scenes) == 1:
         scene = fingerprint_scenes[0]
@@ -494,6 +496,29 @@ def resolve_match(
             confidence=0.99,
             scene=best.scene,
             candidates=tuple(item.scene for item in scored),
+            new_stem=stem,
+            note=note,
+            approved=False,
+        )
+
+    if phash_scenes:
+        ordered = list(phash_scenes)
+        best = ordered[0]
+        stem = build_scene_stem(best, local, studios)
+        if len(ordered) == 1:
+            note = f"phash: {best.source} {best.id}"
+        else:
+            note = "phash совпадения: " + ", ".join(
+                f"{scene.source} {scene.id}" for scene in ordered
+            )
+        if not is_valid_final_stem(stem):
+            stem = _heuristic_stem(local, studios)
+            note += "; имя сцены неполное, heuristic fallback"
+        return MatchResult(
+            source="phash",
+            confidence=0.9,
+            scene=best,
+            candidates=tuple(ordered),
             new_stem=stem,
             note=note,
             approved=False,
