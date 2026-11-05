@@ -343,8 +343,10 @@ class StashDBClient:
         self._sleep = sleep
         self._transport = transport
 
-    def find_scenes_by_hashes(self, hashes: Sequence[str]) -> list[list[Scene]]:
-        """Сцены для каждого OSHASH-отпечатка, в порядке входных хэшей.
+    def find_scenes_by_hashes(
+        self, hashes: Sequence[str], algorithm: str = "OSHASH"
+    ) -> list[list[Scene]]:
+        """Сцены для каждого фингерпринта указанного алгоритма, в порядке входных хэшей.
 
         Дубликаты запрашиваются один раз; результат выровнен по исходной
         последовательности (включая повторные хэши). Хэши отправляются
@@ -361,7 +363,7 @@ class StashDBClient:
                 SCENES_BY_FINGERPRINTS_QUERY,
                 {
                     "fingerprints": [
-                        [{"hash": h, "algorithm": "OSHASH"}] for h in batch
+                        [{"hash": h, "algorithm": algorithm}] for h in batch
                     ]
                 },
             )

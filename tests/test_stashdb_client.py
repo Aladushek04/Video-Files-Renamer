@@ -219,6 +219,24 @@ def scene_node(hashes):
     return data
 
 
+def test_find_scenes_by_hashes_sends_phash_algorithm():
+    calls = []
+
+    def _transport(req, timeout):
+        body = json.loads(req.data)
+        calls.append(body)
+        groups = body["variables"]["fingerprints"]
+        return json.dumps(
+            {"data": {"findScenesBySceneFingerprints": scene_node(groups)}}
+        ).encode()
+
+    client = StashDBClient("k", delay=0, transport=_transport)
+    client.find_scenes_by_hashes(["dc75c0f03795438e"], algorithm="PHASH")
+    assert calls[0]["variables"]["fingerprints"] == [
+        [{"hash": "dc75c0f03795438e", "algorithm": "PHASH"}]
+    ]
+
+
 def test_batches_40_and_keeps_order():
     calls = []
 
