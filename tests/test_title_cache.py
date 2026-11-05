@@ -50,6 +50,53 @@ def test_fingerprint_and_text_query_keys_are_independent(tmp_path):
     cache.close()
 
 
+def test_source_fingerprint_is_keyed_by_source_and_algorithm(tmp_path):
+    cache = TitleCache(tmp_path / "c.sqlite3")
+    scene = Scene(id="x", title="T", release_date=None, date=None, code=None,
+                  duration=None, source="ThePornDB")
+    cache.put_source_fingerprint("ThePornDB", "OSHASH", "abc", [scene])
+    assert cache.get_source_fingerprint("StashDB", "OSHASH", "abc") is None
+    assert cache.get_source_fingerprint("ThePornDB", "PHASH", "abc") is None
+    restored = cache.get_source_fingerprint("ThePornDB", "OSHASH", "abc")
+    assert restored[0].id == "x"
+    assert restored[0].source == "ThePornDB"
+    cache.close()
+
+
+def test_source_negative_result_is_kept(tmp_path):
+    cache = TitleCache(tmp_path / "c.sqlite3")
+    cache.put_source_fingerprint("FansDB", "PHASH", "h", [])
+    assert cache.get_source_fingerprint("FansDB", "PHASH", "h") == []
+    cache.close()
+
+
+def test_legacy_fingerprints_migrated_once(tmp_path):
+    path = tmp_path / "old.sqlite3"
+    raw = sqlite3.connect(path)
+    raw.execute("CREATE TABLE fingerprints (hash TEXT PRIMARY KEY, "
+                "scenes TEXT NOT NULL, fetched_at TEXT NOT NULL)")
+    raw.execute("INSERT INTO fingerprints VALUES ('h1', '[]', ?)",
+                (datetime.now(timezone.utc).isoformat(),))
+    raw.commit()
+    raw.close()
+
+    cache = TitleCache(path)
+    assert cache.get_source_fingerprint("StashDB", "OSHASH", "h1") == []
+    cache.close()
+
+    again = TitleCache(path)
+    assert again.get_fingerprint("h1") == []
+    again.close()
+
+
+def test_local_phash_is_keyed_by_content_not_path(tmp_path):
+    cache = TitleCache(tmp_path / "c.sqlite3")
+    cache.put_local_phash("oh", 100, "dc75c0f03795438e")
+    assert cache.get_local_phash("oh", 100) == "dc75c0f03795438e"
+    assert cache.get_local_phash("oh", 101) is None
+    cache.close()
+
+
 def test_scene_fields_survive_the_roundtrip(tmp_path):
     """Studio and performers are stored as part of the cached scene JSON."""
     scene = Scene(
@@ -111,7 +158,7 @@ def test_corrupt_json_is_treated_as_a_miss(tmp_path):
     cache.close()
 
     conn = sqlite3.connect(str(path))
-    conn.execute("UPDATE fingerprints SET scenes = ? WHERE hash = ?",
+    conn.execute("UPDATE fingerprint_cache SET scenes = ? WHERE hash = ?",
                  ("{not json", "h"))
     conn.commit()
     conn.close()
@@ -128,7 +175,7 @@ def test_corrupt_timestamp_is_treated_as_a_miss(tmp_path):
     cache.close()
 
     conn = sqlite3.connect(str(path))
-    conn.execute("UPDATE fingerprints SET fetched_at = ? WHERE hash = ?",
+    conn.execute("UPDATE fingerprint_cache SET fetched_at = ? WHERE hash = ?",
                  ("not-a-date", "h"))
     conn.commit()
     conn.close()
@@ -147,7 +194,7 @@ def test_stored_payload_is_json_list_of_scene_dicts(tmp_path):
 
     conn = sqlite3.connect(str(path))
     row = conn.execute(
-        "SELECT scenes, fetched_at FROM fingerprints WHERE hash = ?", ("h",)
+        "SELECT scenes, fetched_at FROM fingerprint_cache WHERE hash = ?", ("h",)
     ).fetchone()
     conn.close()
 

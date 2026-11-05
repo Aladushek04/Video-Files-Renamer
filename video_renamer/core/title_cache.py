@@ -5,10 +5,13 @@
 самодостаточен: с его помощью можно работать офлайн, без сети и без
 отдельной таблицы сцен.
 
-Две таблицы:
+Таблицы:
 
     fingerprints(hash TEXT PRIMARY KEY, scenes TEXT NOT NULL, fetched_at TEXT NOT NULL)
+        — устаревшая: однократно переносится в fingerprint_cache при открытии
+    fingerprint_cache(source, algorithm, hash) — сцены источника по фингерпринту
     text_queries(query TEXT PRIMARY KEY, scenes TEXT NOT NULL, fetched_at TEXT NOT NULL)
+    local_phash(oshash, size) — PHASH файла по содержимому, без TTL
 
 Смысл возвращаемого значения:
 
@@ -39,6 +42,18 @@ _SCHEMA = (
     "hash TEXT PRIMARY KEY, scenes TEXT NOT NULL, fetched_at TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS text_queries ("
     "query TEXT PRIMARY KEY, scenes TEXT NOT NULL, fetched_at TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS fingerprint_cache ("
+    "source TEXT NOT NULL, algorithm TEXT NOT NULL, hash TEXT NOT NULL, "
+    "scenes TEXT NOT NULL, fetched_at TEXT NOT NULL, "
+    "PRIMARY KEY (source, algorithm, hash))",
+    "CREATE TABLE IF NOT EXISTS local_phash ("
+    "oshash TEXT NOT NULL, size INTEGER NOT NULL, phash TEXT NOT NULL, "
+    "computed_at TEXT NOT NULL, PRIMARY KEY (oshash, size))",
+)
+_LEGACY_MIGRATION = (
+    "INSERT OR IGNORE INTO fingerprint_cache "
+    "(source, algorithm, hash, scenes, fetched_at) "
+    "SELECT 'StashDB', 'OSHASH', hash, scenes, fetched_at FROM fingerprints"
 )
 
 
@@ -85,6 +100,7 @@ class TitleCache:
         try:
             for statement in _SCHEMA:
                 conn.execute(statement)
+            conn.execute(_LEGACY_MIGRATION)
             conn.commit()
         except sqlite3.Error:
             conn.close()
@@ -97,16 +113,55 @@ class TitleCache:
         return self._path
 
     def get_fingerprint(self, oshash: str) -> list[Scene] | None:
-        """Сцены по OSHASH; `None`, если записи нет или она истекла."""
+        """Сцены по OSHASH из StashDB; `None`, если записи нет или она истекла."""
+        return self.get_source_fingerprint("StashDB", "OSHASH", oshash)
+
+    def put_fingerprint(self, oshash: str, scenes: Sequence[Scene]) -> None:
+        """Сохраняет сцены по OSHASH из StashDB (пустой список — отрицательный кэш)."""
+        self.put_source_fingerprint("StashDB", "OSHASH", oshash, scenes)
+
+    def get_source_fingerprint(
+        self, source: str, algorithm: str, digest: str
+    ) -> list[Scene] | None:
+        """Сцены источника по фингерпринту; `None`, если записи нет или она истекла."""
         row = self._connection().execute(
-            "SELECT scenes, fetched_at FROM fingerprints WHERE hash = ?",
-            (oshash,),
+            "SELECT scenes, fetched_at FROM fingerprint_cache "
+            "WHERE source = ? AND algorithm = ? AND hash = ?",
+            (source, algorithm, digest),
         ).fetchone()
         return self._scenes_from_row(row)
 
-    def put_fingerprint(self, oshash: str, scenes: Sequence[Scene]) -> None:
-        """Сохраняет сцены по OSHASH (пустой список — отрицательный кэш)."""
-        self._put("fingerprints", "hash", oshash, scenes)
+    def put_source_fingerprint(
+        self, source: str, algorithm: str, digest: str, scenes: Sequence[Scene]
+    ) -> None:
+        """Сохраняет сцены источника по фингерпринту (пустой список — отрицательный кэш)."""
+        payload = json.dumps([scene.to_dict() for scene in scenes])
+        conn = self._connection()
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO fingerprint_cache "
+                "(source, algorithm, hash, scenes, fetched_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (source, algorithm, digest, payload, self._now().isoformat()),
+            )
+
+    def get_local_phash(self, oshash: str, size: int) -> str | None:
+        """PHASH файла по его содержимому (OSHASH и размер); TTL не действует."""
+        row = self._connection().execute(
+            "SELECT phash FROM local_phash WHERE oshash = ? AND size = ?",
+            (oshash, size),
+        ).fetchone()
+        return row[0] if row else None
+
+    def put_local_phash(self, oshash: str, size: int, phash: str) -> None:
+        """Сохраняет PHASH файла по его содержимому."""
+        conn = self._connection()
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO local_phash "
+                "(oshash, size, phash, computed_at) VALUES (?, ?, ?, ?)",
+                (oshash, size, phash, self._now().isoformat()),
+            )
 
     def get_text_query(self, term: str) -> list[Scene] | None:
         """Сцены по текстовому запросу; `None`, если записи нет или истекла."""
