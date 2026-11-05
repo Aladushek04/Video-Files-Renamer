@@ -55,13 +55,14 @@ _RESERVED_NAMES = frozenset(
 _MAX_STEM_LENGTH = 255
 
 # Веса сигналов скоринга; недоступные сигналы выбрасываются с перенормировкой.
-_WEIGHT_TITLE = 0.55
-_WEIGHT_PERFORMER = 0.25
+_WEIGHT_TITLE = 0.50
+_WEIGHT_PERFORMER = 0.20
 _WEIGHT_STUDIO = 0.10
 _WEIGHT_DATE = 0.10
+_WEIGHT_CODE = 0.10
 
-_TEXT_THRESHOLD = 0.85
-_TITLE_GUARD = 0.90
+_TEXT_THRESHOLD = 0.60
+_TITLE_GUARD = 0.80
 _PERFORMER_GUARD = 0.50
 _AMBIGUITY_GAP = 0.05
 _TOP_CANDIDATES = 3
@@ -188,28 +189,66 @@ def _jaccard(left: str, right: str) -> float:
     return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
 
 
-def _similarity(left: str, right: str) -> float:
-    """Максимум SequenceMatcher.ratio() и Jaccard по токенам."""
-    norm_left = normalize_for_match(left)
-    norm_right = normalize_for_match(right)
-    if not norm_left or not norm_right:
+def _remove_phrase(text: str, phrase: str) -> str:
+    """Убирает целую фразу из уже нормализованной строки."""
+    if not phrase:
+        return text
+    return _WS.sub(" ", f" {text} ".replace(f" {phrase} ", " ")).strip()
+
+
+def _title_similarity(scene: Scene, local: LocalNameInfo) -> float:
+    """Сходство названий без имён исполнителей и названий студий.
+
+    В локальном имени и официальном названии часто повторяются одни и те же
+    актрисы; если их не убрать, правильная сцена получает заниженный score.
+    """
+    left = normalize_for_match(local.rest)
+    right = normalize_for_match(scene.title or "")
+
+    phrases: set[str] = set()
+    for performer in scene.performers:
+        for name in (performer.display_name, performer.name):
+            normalized = normalize_for_match(name)
+            if normalized:
+                phrases.add(normalized)
+    if scene.studio is not None:
+        normalized = normalize_for_match(scene.studio.name)
+        if normalized:
+            phrases.add(normalized)
+    if local.studio:
+        normalized = normalize_for_match(local.studio)
+        if normalized:
+            phrases.add(normalized)
+
+    for phrase in phrases:
+        left = _remove_phrase(left, phrase)
+        right = _remove_phrase(right, phrase)
+
+    if not left or not right:
         return 0.0
-    ratio = SequenceMatcher(None, norm_left, norm_right).ratio()
-    return max(ratio, _jaccard(norm_left, norm_right))
+    ratio = SequenceMatcher(None, left, right).ratio()
+    return max(ratio, _jaccard(left, right))
 
 
 def _performer_signal(scene: Scene, stem_norm: str) -> tuple[float, bool]:
-    """Доля исполнителей сцены, чьё имя есть в нормализованном stem."""
-    names = [
-        normalize_for_match(performer.display_name)
-        for performer in scene.performers
-    ]
-    names = [name for name in names if name]
-    if not names:
-        return 0.0, False
+    """Доля исполнителей сцены, чьё имя или алиас есть в stem."""
     haystack = f" {stem_norm} "
-    found = sum(1 for name in names if f" {name} " in haystack)
-    return found / len(names), True
+    found = 0
+    total = 0
+    for performer in scene.performers:
+        names = {
+            normalize_for_match(performer.display_name),
+            normalize_for_match(performer.name),
+        }
+        names.discard("")
+        if not names:
+            continue
+        total += 1
+        if any(f" {name} " in haystack for name in names):
+            found += 1
+    if total == 0:
+        return 0.0, False
+    return found / total, True
 
 
 def _studio_signal(
@@ -226,14 +265,23 @@ def _studio_signal(
     local_studio = normalize_for_match(local.studio or "")
     if local_studio:
         compact_local = local_studio.replace(" ", "")
-        if (
-            compact_local == compact_name
-            or compact_local in compact_name
-            or compact_name in compact_local
-        ):
+        if compact_local == compact_name:
             return 1.0, True
+        if compact_local in compact_name or compact_name in compact_local:
+            return 0.5, True
     compact_stem = stem_norm.replace(" ", "")
     return (1.0 if compact_name in compact_stem else 0.0), True
+
+
+def _code_signal(scene: Scene, stem_norm: str) -> tuple[float, bool]:
+    """Бонус за code сцены, если он реально встречается в имени файла."""
+    code = normalize_for_match(scene.code or "")
+    if not code:
+        return 0.0, False
+    compact_code = code.replace(" ", "")
+    if compact_code and compact_code in stem_norm.replace(" ", ""):
+        return 1.0, True
+    return 0.0, False
 
 
 def _scene_date(scene: Scene) -> str | None:
@@ -266,6 +314,7 @@ class ScoredScene:
     performer_hit: float
     studio_hit: float
     date_hit: float
+    code_hit: float = 0.0
 
 
 def score_scene(
@@ -279,10 +328,11 @@ def score_scene(
     перенормируются.
     """
     stem_norm = normalize_for_match(local.stem)
-    title_sim = _similarity(local.rest, scene.title or "")
+    title_sim = _title_similarity(scene, local)
     performer_hit, performer_ok = _performer_signal(scene, stem_norm)
     studio_hit, studio_ok = _studio_signal(scene, local, stem_norm)
     date_hit, date_ok = _date_signal(scene, local)
+    code_hit, code_ok = _code_signal(scene, stem_norm)
 
     signals: list[tuple[float, float]] = []
     if normalize_for_match(local.rest) and normalize_for_match(scene.title or ""):
@@ -293,6 +343,8 @@ def score_scene(
         signals.append((_WEIGHT_STUDIO, studio_hit))
     if date_ok:
         signals.append((_WEIGHT_DATE, date_hit))
+    if code_ok:
+        signals.append((_WEIGHT_CODE, code_hit))
 
     total_weight = sum(weight for weight, _ in signals)
     score = (
@@ -307,6 +359,7 @@ def score_scene(
         performer_hit=performer_hit,
         studio_hit=studio_hit,
         date_hit=date_hit,
+        code_hit=code_hit,
     )
 
 
@@ -315,8 +368,8 @@ def pick_text_match(
 ) -> tuple[ScoredScene | None, bool]:
     """Лучший текстовый кандидат и признак неоднозначности.
 
-    Кандидат проходит, если `score >= 0.85` и сработал guard:
-    `performer_hit >= 0.5` или `title_sim >= 0.90`. Неоднозначность — разрыв
+    Кандидат проходит, если `score >= 0.60` и сработал guard:
+    `performer_hit >= 0.5` или `title_sim >= 0.80`. Неоднозначность — разрыв
     с лучшим из оставшихся прошедших кандидатов меньше 0.05.
     """
     eligible = [
@@ -377,7 +430,8 @@ def _signals_note(scored: ScoredScene) -> str:
     return (
         f"score={scored.score:.3f}, title_sim={scored.title_sim:.3f}, "
         f"performer_hit={scored.performer_hit:.2f}, "
-        f"studio_hit={scored.studio_hit:.0f}, date_hit={scored.date_hit:.1f}"
+        f"studio_hit={scored.studio_hit:.1f}, date_hit={scored.date_hit:.1f}, "
+        f"code_hit={scored.code_hit:.0f}"
     )
 
 
@@ -391,7 +445,7 @@ def resolve_match(
 
     Уникальный fingerprint одобряется автоматически только при валидном
     итоговом stem и содержательном имени (название или два других блока).
-    Текстовое совпадение используется при `score >= 0.85` и пройденном
+    Текстовое совпадение используется при `score >= 0.60` и пройденном
     guard, но никогда не одобряется автоматически.
     """
     if len(fingerprint_scenes) == 1:

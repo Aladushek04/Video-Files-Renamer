@@ -13,6 +13,7 @@ _EMPTY_PAREN = re.compile(r"\(\s*\)")
 _DATE_YMD4 = re.compile(r"\(?(\d{4})[.-](\d{2})[.-](\d{2})\)?")
 _DATE_YMD2 = re.compile(r"\(?(\d{2})[.-](\d{2})[.-](\d{2})\)?")
 _DATE_DMY4 = re.compile(r"\(?(\d{2})[.-](\d{2})[.-](\d{4})\)?")
+_DATE_COMPACT = re.compile(r"(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)")
 _HASH_BRACKET = re.compile(r"\[[a-zA-Z0-9]{5,}\]")
 _PARTICLES = {"del", "de", "la", "van", "von", "di", "da", "le", "dos", "das", "do"}
 _ARTICLES = {"the", "a", "an", "and", "of", "for"}
@@ -34,9 +35,9 @@ def strip_tech_junk(stem: str) -> str:
         return f"\x00{len(keepers) - 1}\x00"
 
     s = _KEEP_PAREN.sub(_hold, stem)
+    s = _SEP.sub(" ", s)
     s = _TECH_PAREN.sub(" ", s)
     s = _TECH_WORD.sub(" ", s)
-    s = _SEP.sub(" ", s)
     s = _EMPTY_PAREN.sub(" ", s)
     s = _WS.sub(" ", s).strip(" -")
     for i, k in enumerate(keepers):
@@ -82,6 +83,13 @@ def extract_date(stem: str) -> tuple:
         yyyy = f"20{yy}" if int(yy) <= 30 else f"19{yy}"
         out = f"{dd}.{mm}.{yyyy}"
         return _WS.sub(" ", stem[: m.start()] + " " + stem[m.end():]).strip(" -"), out
+    m = _DATE_COMPACT.search(stem)
+    if m:
+        yy, mm, dd = m.group(1), m.group(2), m.group(3)
+        if 1 <= int(mm) <= 12 and 1 <= int(dd) <= 31:
+            yyyy = f"20{yy}" if int(yy) <= 30 else f"19{yy}"
+            out = f"{dd}.{mm}.{yyyy}"
+            return _WS.sub(" ", stem[: m.start()] + " " + stem[m.end():]).strip(" -"), out
     return stem, None
 
 

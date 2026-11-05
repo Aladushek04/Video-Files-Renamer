@@ -32,6 +32,10 @@ def test_strip_tech_junk_keeps_remastered():
     assert "Remastered" in strip_tech_junk("Title (Remastered) 1080p")
 
 
+def test_strip_tech_junk_after_underscore_separator():
+    assert strip_tech_junk("Title_1080p") == "Title"
+
+
 def test_unicode_stem_untouched():
     assert strip_tech_junk("Olivia del Río 1080p") == "Olivia del Río"
 
@@ -44,6 +48,18 @@ def test_extract_date_yy_mm_dd():
 def test_extract_date_yyyy_mm_dd():
     rest, d = extract_date("Title 2023.10.14 rest")
     assert d == "14.10.2023"
+
+
+def test_extract_date_compact_yymmdd():
+    rest, d = extract_date("260625 Rossavaxx Hardcore")
+    assert d == "25.06.2026"
+    assert rest == "Rossavaxx Hardcore"
+
+
+def test_extract_date_ignores_invalid_compact():
+    rest, d = extract_date("999999 Title")
+    assert d is None
+    assert rest == "999999 Title"
 
 
 def test_extract_studio_from_dict():

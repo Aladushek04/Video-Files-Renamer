@@ -164,7 +164,7 @@ def test_score_scene_renormalizes_missing_performer_signal():
     scored = score_scene(scene(performers=()), local(rest="Poking Glory"), {})
     assert scored.performer_hit == 0.0
     assert scored.score == pytest.approx(
-        (0.55 * scored.title_sim + 0.10 + 0.10) / 0.75
+        (0.50 * scored.title_sim + 0.10 + 0.10) / 0.70
     )
 
 
@@ -178,7 +178,7 @@ def test_score_scene_drops_unavailable_date_signal():
     scored = score_scene(scene(), local_no_date, {})
     assert scored.date_hit == 0.0
     assert scored.score == pytest.approx(
-        (0.55 * scored.title_sim + 0.25 + 0.10) / 0.90
+        (0.50 * scored.title_sim + 0.20 + 0.10) / 0.80
     )
 
 
@@ -190,13 +190,13 @@ def test_score_scene_performer_hit_is_fraction_found():
 
 
 def test_pick_text_match_threshold_and_guard():
-    low = ScoredScene(scene(), 0.84, 1.0, 1.0, 1.0, 1.0)
+    low = ScoredScene(scene(), 0.59, 1.0, 1.0, 1.0, 1.0)
     assert pick_text_match([low]) == (None, False)
 
-    unguarded = ScoredScene(scene(), 0.90, 0.80, 0.0, 1.0, 1.0)
+    unguarded = ScoredScene(scene(), 0.70, 0.70, 0.0, 1.0, 1.0)
     assert pick_text_match([unguarded]) == (None, False)
 
-    guarded = ScoredScene(scene(), 0.90, 0.80, 0.5, 1.0, 1.0)
+    guarded = ScoredScene(scene(), 0.70, 0.70, 0.5, 1.0, 1.0)
     assert pick_text_match([guarded]) == (guarded, False)
 
 
@@ -286,6 +286,72 @@ def test_text_match_is_not_auto_approved():
     assert result.approved is False
     assert result.scene.id == "s1"
     assert result.note.startswith("text:")
+
+
+def test_text_match_ignores_performer_names_in_title_comparison():
+    local_name = LocalNameInfo(
+        "Brazzers Adriana Chechik Fucking Fired Pov Anal",
+        None,
+        "Brazzers",
+        "Adriana Chechik-Fucking Fired Pov Anal",
+    )
+    candidate = Scene(
+        "s1", "Fucking Fired", "2020-02-22", None, "4411505", 1,
+        Studio("st", "Brazzers Exxtra"),
+        (Performer("p1", "Manuel Ferrara"),
+         Performer("p2", "Adriana Chechik")),
+    )
+    scored = score_scene(candidate, local_name, {})
+    assert scored.title_sim >= 0.70
+    assert scored.score >= 0.60
+    best, ambiguous = pick_text_match([scored])
+    assert best is scored
+    assert ambiguous is False
+
+
+def test_text_match_rejects_same_performer_wrong_studio():
+    local_name = LocalNameInfo(
+        "260714 thevictorbliss Milf Sneaks into Hot Tub & Seduces Owner "
+        "Taylor Vixxen 1080p",
+        "14.07.2026",
+        None,
+        "thevictorbliss Milf Sneaks into Hot Tub & Seduces Owner Taylor Vixxen",
+    )
+    wrong = Scene(
+        "s1", "Hot, blonde MILF Taylor Vixxen: Countdown to cum",
+        "2025-09-24", None, "79159", 1, Studio("st", "40 Something Mag"),
+        (Performer("p1", "Taylor Vixxen"),),
+    )
+    scored = score_scene(wrong, local_name, {})
+    assert scored.score < 0.60
+    assert pick_text_match([scored]) == (None, False)
+
+
+def test_compact_date_and_performers_accept_correct_scene():
+    local_name = parse_local_name(
+        "260625 Rossavaxx Hardcore Fucked Rossa Vaxx With A Brazilian Boy "
+        "4K Orig.mp4",
+        {},
+    )
+    assert local_name.date == "25.06.2026"
+    candidate = Scene(
+        "s1", "HARDCORE fucked Rossa Vaxx with a BRAZILIAN BOY",
+        "2026-06-25", None, "4908160", 1, Studio("st", "Rossa Vaxx"),
+        (Performer("p1", "Air Thugger"), Performer("p2", "Rossa Vaxx")),
+    )
+    scored = score_scene(candidate, local_name, {})
+    assert scored.score >= 0.60
+    assert pick_text_match([scored])[0] is scored
+
+
+def test_code_signal_matches_scene_code():
+    local_name = LocalNameInfo("1135 Gia", None, None, "1135 Gia")
+    candidate = Scene(
+        "s1", "Tryouts with Gia", "2018-01-03", None, "1135", 1,
+        Studio("st", "Net Video Girls"), (Performer("p1", "Gia"),),
+    )
+    scored = score_scene(candidate, local_name, {})
+    assert scored.code_hit == 1.0
 
 
 def test_ambiguous_text_match_is_flagged():
