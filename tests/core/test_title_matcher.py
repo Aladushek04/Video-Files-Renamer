@@ -279,6 +279,37 @@ def test_heuristic_fallback_lists_only_top_three_candidates():
     assert len(result.candidates) == 3
 
 
+def test_phash_single_scene_is_never_approved():
+    result = resolve_match(local(), {}, [], [], phash_scenes=[scene()])
+    assert result.source == "phash"
+    assert result.approved is False
+    assert result.note.startswith("phash")
+    assert "требует ревью" in result.note
+    assert result.scene.id == "s1"
+
+
+def test_phash_multiple_scenes_list_candidates():
+    result = resolve_match(local(), {}, [], [],
+                           phash_scenes=[scene("a"), scene("b")])
+    assert [s.id for s in result.candidates] == ["a", "b"]
+    assert result.approved is False
+    assert result.note.startswith("phash")
+
+
+def test_phash_skips_text_search():
+    result = resolve_match(local(), {}, [], [scene("t")],
+                           phash_scenes=[scene("p")])
+    assert result.source == "phash"
+    assert result.scene.id == "p"
+
+
+def test_secondary_scene_without_title_is_not_approved():
+    sparse = Scene("x", None, None, None, None, None, None, (),
+                   source="ThePornDB")
+    result = resolve_match(local(), {}, [sparse], [])
+    assert result.approved is False
+
+
 def test_text_match_is_not_auto_approved():
     result = resolve_match(local("Poking Glory"), {}, [],
                            [scene(), scene("s2", "Other")])

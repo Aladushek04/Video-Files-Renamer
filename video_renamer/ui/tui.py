@@ -44,6 +44,7 @@ from video_renamer.core.rename_log import (
 )
 from video_renamer.core.undo import run_undo, select_for_undo
 from video_renamer.cli import append_rename_log
+from video_renamer.core.fingerprint_sources import build_fingerprint_clients
 from video_renamer.core.stashdb_client import Scene, StashDBClient
 from video_renamer.core.title_cache import TitleCache
 from video_renamer.core.title_matcher import is_valid_final_stem
@@ -65,12 +66,14 @@ from video_renamer.ui.tui_model import FILTERS, ReviewModel
 
 SOURCE_LABELS = {
     "fingerprint": "Fingerprint",
+    "phash": "PHASH",
     "text": "Текст",
     "heuristic": "Эвристика",
     "unchanged": "Без изменений",
 }
 SOURCE_STYLES = {
     "fingerprint": "bold #67e8f9",
+    "phash": "bold #c4b5fd",
     "text": "bold #fbbf24",
     "heuristic": "#f87171",
     "unchanged": "dim",
@@ -78,7 +81,8 @@ SOURCE_STYLES = {
 PHASE_LABELS = {
     "scan": "Сканирую файлы",
     "hash": "Считаю отпечатки",
-    "fingerprint": "Ищу в StashDB",
+    "fingerprint": "Ищу в StashDB, ThePornDB и FansDB",
+    "phash": "Считаю PHASH",
     "text": "Текстовый поиск",
     "done": "Готово",
 }
@@ -1030,6 +1034,9 @@ class RenamerApp(App[None]):
                 client,
                 offline=not bool(self.key),
                 progress=progress,
+                extra_clients=build_fingerprint_clients(
+                    os.environ, offline=not bool(self.key)
+                ),
             )
             self._service = service
             return service.preview()

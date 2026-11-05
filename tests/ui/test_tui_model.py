@@ -43,6 +43,14 @@ def test_set_row_replaces_manual_choice():
     assert model.rows[0].new_rel == "Chosen.mp4"
 
 
+def test_stats_counts_phash_rows_as_pending():
+    model = ReviewModel("D:/Videos", [row("phash", False)])
+    stats = model.stats()
+    assert stats["phash"] == 1
+    assert stats["pending"] == 1
+    assert stats["approved"] == 0
+
+
 def test_stats_counts_sources_and_approvals():
     model = ReviewModel("D:/Videos", [
         row("fingerprint", True),
@@ -57,5 +65,6 @@ def test_stats_counts_sources_and_approvals():
         "text": 1,
         "heuristic": 1,
         "fingerprint": 1,
+        "phash": 0,
         "unchanged": 1,
     }
