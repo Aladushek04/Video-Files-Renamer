@@ -696,6 +696,17 @@ def test_apply_rejects_extension_mismatch_and_overlong_name(tmp_path):
     assert (tmp_path / "a.mp4").exists()
 
 
+def test_apply_skips_size_check_when_size_unknown(tmp_path):
+    write(tmp_path / "a.mp4", size=50)
+    row = PreviewRow(True, "a.mp4", "b.mp4", "fingerprint", 1.0, "s", "", "h", None)
+    report = TitleService(
+        str(tmp_path), {}, None, oshash_func=lambda path: "h",
+    ).apply_rows([row], dry_run=False)
+
+    assert report.results[0].status == "renamed"
+    assert (tmp_path / "b.mp4").exists()
+
+
 def test_apply_rejects_stale_size_and_oshash(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"abc")
     (tmp_path / "b.mp4").write_bytes(b"abc")

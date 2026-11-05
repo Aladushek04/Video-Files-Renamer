@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 import sys
 import threading
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -35,6 +34,7 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 from video_renamer.core.clean_ph_names import load_studios
+from video_renamer.core.rename_log import format_log_timestamp
 from video_renamer.cli import append_rename_log
 from video_renamer.core.stashdb_client import Scene, StashDBClient
 from video_renamer.core.title_cache import TitleCache
@@ -1011,7 +1011,8 @@ class RenamerApp(App[None]):
                     str(LOG_PATH),
                     rows,
                     report.results,
-                    datetime.now(timezone.utc).isoformat(),
+                    format_log_timestamp(),
+                    root=str(self.model.folder),
                 )
             except Exception as exc:  # noqa: BLE001 - log must not hide result
                 log_error = str(exc) or exc.__class__.__name__

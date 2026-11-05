@@ -21,9 +21,16 @@ import os
 import sqlite3
 import sys
 from collections.abc import Sequence
-from datetime import datetime, timezone
 
 from video_renamer.core.clean_ph_names import load_studios
+from video_renamer.core.rename_log import (
+    ACTION_RENAME,
+    LogEntry,
+    _guard_formula,
+    _unguard_formula,
+    append_log,
+    format_log_timestamp,
+)
 from video_renamer.core.stashdb_client import (
     StashDBAuthError,
     StashDBClient,
@@ -46,37 +53,12 @@ CSV_FIELDS = (
     "approved", "old", "new", "source", "confidence",
     "scene_id", "note", "oshash", "size",
 )
-LOG_FIELDS = ("timestamp", "old", "new", "oshash", "scene_id", "source")
 _APPROVED_VALUES = frozenset({"y", "yes", "1", "true"})
-_FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 DEFAULT_CSV = "preview.csv"
 DEFAULT_LOG = str(LOG_PATH)
 DEFAULT_STUDIOS = str(STUDIOS_PATH)
 DEFAULT_CACHE = str(CACHE_PATH)
-
-
-def _guard_formula(value: str) -> str:
-    """Экранирует значение, которое Excel принял бы за формулу.
-
-    Если значение уже начинается с апострофа, за которым идёт формульный
-    префикс, добавляется ещё один апостроф: так настоящий апостроф в имени
-    не путается с защитным.
-    """
-    if value.startswith(_FORMULA_PREFIXES) or (
-        value.startswith("'")
-        and value.lstrip("'").startswith(_FORMULA_PREFIXES)
-    ):
-        return "'" + value
-    return value
-
-
-def _unguard_formula(value: str) -> str:
-    """Снимает ровно один защитный апостроф, добавленный `_guard_formula`."""
-    if (value.startswith("'")
-            and value.lstrip("'").startswith(_FORMULA_PREFIXES)):
-        return value[1:]
-    return value
 
 
 def _parse_approved(value: object) -> bool:
@@ -125,7 +107,7 @@ def write_preview_csv(path: str, rows: Sequence[PreviewRow]) -> None:
                 row.scene_id,
                 _guard_formula(row.note),
                 row.oshash,
-                str(row.size),
+                "" if row.size is None else str(row.size),
             ))
 
 
@@ -165,43 +147,44 @@ def append_rename_log(
     rows: Sequence[PreviewRow],
     results: Sequence[ApplyResult],
     timestamp: str,
+    *,
+    root: str,
 ) -> None:
-    """Дописывает в лог только фактически переименованные строки.
+    """Дописывает в журнал только фактически переименованные строки.
 
-    Строка лога: `timestamp;old;new;oshash;scene_id;source`, где `new` —
-    фактическое имя из `ApplyResult` (с суффиксом коллизии, если он был
-    добавлен), а `oshash`/`scene_id`/`source` берутся из `PreviewRow`,
-    найденной по `old_rel`. Заголовок пишется один раз; BOM добавляется
-    только в новый файл, чтобы при дописывании он не попадал в середину.
+    `new` — фактическое имя из `ApplyResult` (с суффиксом коллизии, если он был
+    добавлен), `oshash`/`size`/`scene_id`/`source` — из `PreviewRow`, найденной
+    по `old_rel`. `root` — корневая папка, относительно которой заданы пути.
+    Запись выполняет `rename_log.append_log` (формат, миграция старого файла).
     """
     renamed = [result for result in results if result.status == "renamed"]
     if not renamed:
         return
 
     by_old = {row.old_rel: row for row in rows}
-    _ensure_parent(path)
-    exists = os.path.isfile(path) and os.path.getsize(path) > 0
-    mode = "a" if exists else "w"
-    encoding = "utf-8" if exists else "utf-8-sig"
-    with open(path, mode, encoding=encoding, newline="") as handle:
-        writer = csv.writer(handle, delimiter=";")
-        if not exists:
-            writer.writerow(LOG_FIELDS)
-        for result in renamed:
-            row = by_old.get(result.old_rel)
-            writer.writerow((
-                timestamp,
-                _guard_formula(result.old_rel),
-                _guard_formula(result.new_rel),
-                row.oshash if row is not None else "",
-                row.scene_id if row is not None else "",
-                row.source if row is not None else "",
-            ))
+    abs_root = os.path.abspath(root)
+    entries = []
+    for result in renamed:
+        row = by_old.get(result.old_rel)
+        entries.append(LogEntry(
+            timestamp=timestamp,
+            action=ACTION_RENAME,
+            undoes="",
+            root=abs_root,
+            old=result.old_rel,
+            new=result.new_rel,
+            oshash=row.oshash if row is not None else "",
+            size=row.size if row is not None else None,
+            scene_id=row.scene_id if row is not None else "",
+            source=row.source if row is not None else "",
+            legacy=False,
+        ))
+    append_log(path, entries)
 
 
 def _timestamp() -> str:
-    """Метка времени UTC в ISO 8601 для `rename_log.csv`."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    """Метка времени журнала: одна функция для CLI и TUI."""
+    return format_log_timestamp()
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -384,7 +367,7 @@ def _run_apply(args: argparse.Namespace,
 
     if args.apply and renamed:
         try:
-            append_rename_log(args.log, rows, report.results, _timestamp())
+            append_rename_log(args.log, rows, report.results, _timestamp(), root=root)
         except OSError as exc:
             print(
                 f"error: cannot write rename log {args.log}: {exc}",

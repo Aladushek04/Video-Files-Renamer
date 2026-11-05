@@ -72,7 +72,7 @@ class PreviewRow:
     scene_id: str
     note: str
     oshash: str
-    size: int
+    size: int | None
     candidates: tuple[Scene, ...] = ()
 
 
@@ -585,7 +585,7 @@ class TitleService:
             return None, "old path is not a regular file"
 
         if not force:
-            if source_stat.st_size != row.size:
+            if row.size is not None and source_stat.st_size != row.size:
                 return None, (
                     f"stale size: expected {row.size}, "
                     f"actual {source_stat.st_size}"
