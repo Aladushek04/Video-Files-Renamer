@@ -24,7 +24,6 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from video_renamer.core.clean_ph_names import load_studios
-from video_renamer.core.env_file import load_env_file
 from video_renamer.core.stashdb_client import (
     StashDBAuthError,
     StashDBClient,
@@ -34,6 +33,7 @@ from video_renamer.core.stashdb_client import (
 )
 from video_renamer.core.title_cache import TitleCache
 from video_renamer.core.title_service import ApplyResult, PreviewRow, TitleService
+from video_renamer.paths import CACHE_PATH, STUDIOS_PATH, load_project_env
 
 __all__ = [
     "append_rename_log",
@@ -52,21 +52,29 @@ _FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 DEFAULT_CSV = "preview.csv"
 DEFAULT_LOG = "rename_log.csv"
-DEFAULT_STUDIOS = "data/studios.json"
-DEFAULT_CACHE = os.path.join("cache", "title_fixer.sqlite3")
+DEFAULT_STUDIOS = str(STUDIOS_PATH)
+DEFAULT_CACHE = str(CACHE_PATH)
 
 
 def _guard_formula(value: str) -> str:
-    """Экранирует значение, которое Excel принял бы за формулу."""
-    if value.startswith(_FORMULA_PREFIXES):
+    """Экранирует значение, которое Excel принял бы за формулу.
+
+    Если значение уже начинается с апострофа, за которым идёт формульный
+    префикс, добавляется ещё один апостроф: так настоящий апостроф в имени
+    не путается с защитным.
+    """
+    if value.startswith(_FORMULA_PREFIXES) or (
+        value.startswith("'")
+        and value.lstrip("'").startswith(_FORMULA_PREFIXES)
+    ):
         return "'" + value
     return value
 
 
 def _unguard_formula(value: str) -> str:
-    """Снимает апостроф, добавленный `_guard_formula`."""
-    if (len(value) >= 2 and value[0] == "'"
-            and value[1:].startswith(_FORMULA_PREFIXES)):
+    """Снимает ровно один защитный апостроф, добавленный `_guard_formula`."""
+    if (value.startswith("'")
+            and value.lstrip("'").startswith(_FORMULA_PREFIXES)):
         return value[1:]
     return value
 
@@ -115,7 +123,7 @@ def write_preview_csv(path: str, rows: Sequence[PreviewRow]) -> None:
                 row.source,
                 str(row.confidence),
                 row.scene_id,
-                row.note,
+                _guard_formula(row.note),
                 row.oshash,
                 str(row.size),
             ))
@@ -145,7 +153,7 @@ def read_preview_csv(path: str) -> list[PreviewRow]:
                 source=record.get("source") or "",
                 confidence=_parse_float(record.get("confidence")),
                 scene_id=record.get("scene_id") or "",
-                note=record.get("note") or "",
+                note=_unguard_formula(record.get("note") or ""),
                 oshash=record.get("oshash") or "",
                 size=_parse_int(record.get("size")),
             ))
@@ -272,7 +280,7 @@ def _run_preview(args: argparse.Namespace,
         print(f"error: not a directory: {args.directory}", file=sys.stderr)
         return 2
 
-    load_env_file()
+    load_project_env()
     api_key = os.environ.get("STASHDB_API_KEY", "").strip()
     offline = bool(args.offline)
     if not api_key and not offline:

@@ -1,5 +1,6 @@
 """Тесты CLI `fix_video_titles.py`: CSV-ревью и режимы preview/apply."""
 import csv
+from pathlib import Path
 
 import pytest
 
@@ -58,6 +59,25 @@ def test_csv_formula_guard_covers_old_and_roundtrips_all_fields(tmp_path):
     assert read_preview_csv(str(p)) == [row]
 
 
+def test_csv_preserves_leading_apostrophe_before_formula_prefix(tmp_path):
+    p = tmp_path / "preview.csv"
+    row = PreviewRow(False, "'-old.mp4", "''-new.mp4", "text", 0.5,
+                     "s3", "", "h", 3)
+    write_preview_csv(str(p), [row])
+    assert read_preview_csv(str(p)) == [row]
+
+
+def test_csv_guards_note_formula_and_roundtrips(tmp_path):
+    p = tmp_path / "preview.csv"
+    note = "=SUM(1;2)"
+    row = PreviewRow(False, "a.mp4", "b.mp4", "text", 0.5, "s4", note,
+                     "h", 3)
+    write_preview_csv(str(p), [row])
+    raw = p.read_text(encoding="utf-8-sig")
+    assert "'=SUM(1;2)" in raw
+    assert read_preview_csv(str(p)) == [row]
+
+
 def test_csv_read_accepts_approved_variants(tmp_path):
     p = tmp_path / "preview.csv"
     p.write_text(
@@ -88,6 +108,38 @@ def test_preview_cli_writes_csv_and_does_not_rename(tmp_path, monkeypatch):
     assert code == 0
     assert (tmp_path / "old.mp4").exists()
     assert (tmp_path / "p.csv").exists()
+
+
+def test_preview_defaults_are_independent_of_cwd(tmp_path, monkeypatch):
+    seen = {}
+
+    class FakeCache:
+        def __init__(self, path):
+            seen["cache"] = path
+
+        def close(self):
+            pass
+
+    class FakeService:
+        def __init__(self, root, studios, cache, client=None, **kwargs):
+            pass
+
+        def preview(self):
+            return PreviewReport(rows=(), warnings=(), had_transient_errors=False)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("STASHDB_API_KEY", "")
+    monkeypatch.setattr(
+        fix_video_titles, "_load_studios",
+        lambda path: seen.setdefault("studios", path) or {},
+    )
+    monkeypatch.setattr(fix_video_titles, "TitleCache", FakeCache)
+    monkeypatch.setattr(fix_video_titles, "TitleService", FakeService)
+    code = main(["preview", str(tmp_path), "--offline",
+                 "--csv", str(tmp_path / "p.csv")])
+    assert code == 0
+    assert Path(seen["studios"]).is_absolute()
+    assert Path(seen["cache"]).is_absolute()
 
 
 def test_preview_reads_api_key_from_dotenv(tmp_path, monkeypatch):
@@ -290,6 +342,29 @@ def test_apply_row_error_exits_1(tmp_path, capsys):
     assert code == 1
     assert not (tmp_path / "rename_log.csv").exists()
     assert "missing.mp4" in capsys.readouterr().err
+
+
+def test_apply_recursive_row_stays_in_subfolder(tmp_path):
+    import os
+
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    video = sub / "a.mp4"
+    video.write_bytes(b"abcdefghij")
+    csv_path = tmp_path / "preview.csv"
+    write_preview_csv(str(csv_path), [PreviewRow(
+        True, os.path.join("sub", "a.mp4"), os.path.join("sub", "b.mp4"),
+        "fingerprint", 1.0, "s1", "", oshash_from_path(str(video)), 10,
+    )])
+
+    code = main([
+        "apply", str(csv_path), "--root", str(tmp_path),
+        "--log", str(tmp_path / "rename_log.csv"), "--apply",
+    ])
+
+    assert code == 0
+    assert (sub / "b.mp4").exists()
+    assert not video.exists()
 
 
 def test_apply_missing_csv_exits_2(tmp_path, capsys):

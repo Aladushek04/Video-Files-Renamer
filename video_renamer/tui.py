@@ -35,7 +35,6 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 from video_renamer.core.clean_ph_names import load_studios
-from video_renamer.core.env_file import load_env_file
 from video_renamer.cli import append_rename_log
 from video_renamer.core.stashdb_client import Scene, StashDBClient
 from video_renamer.core.title_cache import TitleCache
@@ -46,6 +45,12 @@ from video_renamer.core.title_service import (
     PreviewRow,
     ProgressEvent,
     TitleService,
+)
+from video_renamer.paths import (
+    CACHE_PATH,
+    LOG_PATH,
+    STUDIOS_PATH,
+    load_project_env,
 )
 from video_renamer.studio_tasks import run as run_studio_task
 from video_renamer.tui_model import FILTERS, ReviewModel
@@ -135,8 +140,10 @@ class ConfirmApply(ModalScreen[bool]):
                 f"Fingerprint: {self.sources.get('fingerprint', 0)} · "
                 f"Текст: {self.sources.get('text', 0)} · "
                 f"Эвристика: {self.sources.get('heuristic', 0)}\n\n"
-                "Отменить это будет нельзя без rename_log.csv.",
+                "Переименование выполняется сразу, отменить его нельзя. "
+                f"Журнал операций: {LOG_PATH}.",
                 classes="modal-body",
+                id="confirm-body",
             )
             with Horizontal(classes="modal-buttons"):
                 yield Button("Отмена", id="confirm-cancel")
@@ -151,14 +158,53 @@ class ConfirmApply(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class ConfirmQuit(ModalScreen[bool]):
+    """Подтверждение выхода, если в таблице есть несохранённые строки."""
+
+    BINDINGS = [Binding("escape", "cancel", "Отмена")]
+
+    def __init__(self, total: int, approved: int) -> None:
+        super().__init__()
+        self.total = total
+        self.approved = approved
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="quit-dialog"):
+            yield Static("Выйти из программы?", classes="modal-title")
+            yield Static(
+                f"В таблице строк: {self.total}, одобрено: {self.approved}.\n\n"
+                "Если выйти сейчас, результаты preview и несохранённые "
+                "одобрения будут потеряны. Переименования уже применённых "
+                "файлов не отменяются.",
+                classes="modal-body",
+            )
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Остаться", id="quit-cancel")
+                yield Button("Выйти", id="quit-confirm", variant="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "quit-confirm")
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
 class ApplyResultModal(ModalScreen[None]):
     """Итог применения: сколько переименовано и какие ошибки."""
 
     BINDINGS = [Binding("escape", "close", "Закрыть")]
 
-    def __init__(self, report: ApplyReport) -> None:
+    def __init__(
+        self,
+        report: ApplyReport,
+        *,
+        log_path: str = "rename_log.csv",
+        log_error: str = "",
+    ) -> None:
         super().__init__()
         self.report = report
+        self.log_path = log_path
+        self.log_error = log_error
 
     def compose(self) -> ComposeResult:
         replaced = sum(1 for r in self.report.results if r.status == "renamed")
@@ -170,9 +216,17 @@ class ApplyResultModal(ModalScreen[None]):
                 f"Переименовано: {replaced}\n"
                 f"Пропущено: {skipped}\n"
                 f"Ошибок: {len(errors)}\n\n"
-                f"Журнал: rename_log.csv",
+                f"Журнал: {self.log_path}",
                 classes="modal-body",
             )
+            if self.log_error:
+                yield Static(
+                    Text(
+                        f"Журнал не записан: {self.log_error}",
+                        style="#fca5a5",
+                    ),
+                    id="log-error",
+                )
             if errors:
                 with VerticalScroll(id="error-list"):
                     for result in errors[:20]:
@@ -289,14 +343,22 @@ class NameEditor(ModalScreen[str | None]):
         if "/" in value or "\\" in value:
             error.update(Text("Подпапки запрещены.", style="#f87171"))
             return
-        if os.path.splitext(value)[1] != suffix:
+        value_suffix = os.path.splitext(value)[1]
+        if value_suffix.casefold() != suffix.casefold():
             error.update(
-                Text(f"Расширение должно остаться {suffix}.", style="#f87171")
+                Text(
+                    f"Расширение должно совпадать с исходным: {suffix} "
+                    "(регистр не важен).",
+                    style="#f87171",
+                )
             )
             return
-        if len(value) > 255 or not is_valid_final_stem(
-            os.path.splitext(value)[0]
-        ):
+        if len(value) > 255:
+            error.update(
+                Text("Имя длиннее 255 символов.", style="#f87171")
+            )
+            return
+        if not is_valid_final_stem(os.path.splitext(value)[0]):
             error.update(Text("Недопустимое имя для Windows.", style="#f87171"))
             return
         self.dismiss(value)
@@ -530,7 +592,7 @@ class RenamerApp(App[None]):
             self._size_warned = False
 
     def on_mount(self) -> None:
-        load_env_file()
+        load_project_env()
         self.key = os.environ.get("STASHDB_API_KEY", "").strip()
         self._update_environment()
         table = self.query_one("#table", DataTable)
@@ -538,7 +600,6 @@ class RenamerApp(App[None]):
         table.add_column("Новое имя", key="new", width=58)
         table.add_column("Источник", key="source", width=12)
         table.add_column("Conf", key="confidence", width=7)
-        table.add_column("Комментарий", key="note", width=32)
         self.query_one("#progress", ProgressBar).add_class("hidden")
         self._refresh_table()
         self.query_one("#folder", Input).focus()
@@ -550,7 +611,7 @@ class RenamerApp(App[None]):
             else "StashDB: ключа нет — offline"
         )
         self.query_one("#api-status", Static).update(Text(key_status))
-        studios = Path("data/studios.json")
+        studios = STUDIOS_PATH
         if studios.exists():
             size = studios.stat().st_size / (1024 * 1024)
             db_status = f"Справочник: {size:.1f} MB"
@@ -563,9 +624,12 @@ class RenamerApp(App[None]):
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy
-        self.query_one("#preview", Button).disabled = busy
-        self.query_one("#studios", Button).disabled = busy
-        self.query_one("#apply", Button).disabled = busy or not self.model.approved_rows()
+        for selector in (
+            "#preview", "#studios", "#browse", "#approve", "#reject",
+            "#apply", "#filter",
+        ):
+            self.query_one(selector).disabled = busy
+        self.query_one("#folder", Input).disabled = busy
         self._update_action_state()
         progress = self.query_one("#progress", ProgressBar)
         if busy:
@@ -646,9 +710,6 @@ class RenamerApp(App[None]):
                     style=SOURCE_STYLES.get(row.source, ""),
                 ),
                 f"{row.confidence:.2f}",
-                Text(
-                    row.note or "—", overflow="ellipsis", no_wrap=True
-                ),
                 key=str(index),
             )
         if visible:
@@ -678,7 +739,7 @@ class RenamerApp(App[None]):
     def _get_service(self) -> TitleService:
         if self._service is not None:
             return self._service
-        studios_path = Path("data/studios.json")
+        studios_path = STUDIOS_PATH
         studios = load_studios(str(studios_path)) if studios_path.exists() else {}
         self._service = TitleService(self.model.folder, studios, None, None)
         return self._service
@@ -710,7 +771,27 @@ class RenamerApp(App[None]):
 
     # --- actions ---------------------------------------------------------
 
+    def action_quit(self) -> None:
+        if isinstance(self.screen, ModalScreen):
+            return
+        if self._busy:
+            self.notify("Дождитесь завершения операции", severity="warning")
+            return
+        if not self.model.rows:
+            self.exit()
+            return
+        self.push_screen(
+            ConfirmQuit(len(self.model.rows), len(self.model.approved_rows())),
+            self._quit_confirmed,
+        )
+
+    def _quit_confirmed(self, confirmed: bool | None) -> None:
+        if confirmed:
+            self.exit()
+
     def action_browse(self) -> None:
+        if self._busy:
+            return
         start = Path(self.query_one("#folder", Input).value or self.folder)
         if not start.is_dir():
             start = Path.cwd()
@@ -737,9 +818,9 @@ class RenamerApp(App[None]):
         if self._preview_factory is not None:
             return self._preview_factory(folder, progress)
 
-        studios_path = Path("data/studios.json")
+        studios_path = STUDIOS_PATH
         studios = load_studios(str(studios_path)) if studios_path.exists() else {}
-        cache = TitleCache("cache/title_fixer.sqlite3")
+        cache = TitleCache(str(CACHE_PATH))
         client = StashDBClient(self.key) if self.key else None
         try:
             service = TitleService(
@@ -789,6 +870,8 @@ class RenamerApp(App[None]):
         self.notify(str(exc), severity="error", timeout=10)
 
     def action_toggle(self) -> None:
+        if self._busy:
+            return
         index = self._selected_index()
         if index is None:
             return
@@ -807,6 +890,8 @@ class RenamerApp(App[None]):
         self.push_screen(StudioDialog())
 
     def action_candidates(self) -> None:
+        if self._busy:
+            return
         index = self._selected_index()
         if index is None:
             return
@@ -836,6 +921,8 @@ class RenamerApp(App[None]):
         self.notify("Кандидат выбран; проверьте имя", timeout=4)
 
     def action_edit(self) -> None:
+        if self._busy:
+            return
         index = self._selected_index()
         if index is None:
             return
@@ -856,6 +943,8 @@ class RenamerApp(App[None]):
         self.notify("Имя изменено вручную", timeout=4)
 
     def action_approve(self) -> None:
+        if self._busy:
+            return
         index = self._selected_index()
         if index is None:
             return
@@ -867,6 +956,8 @@ class RenamerApp(App[None]):
         self._update_stats()
 
     def action_reject(self) -> None:
+        if self._busy:
+            return
         index = self._selected_index()
         if index is None:
             return
@@ -901,28 +992,63 @@ class RenamerApp(App[None]):
     @work(thread=True, exclusive=True)
     def _apply_worker(self, rows: list[PreviewRow]) -> None:
         try:
-            if self._apply_factory is not None:
-                report = self._apply_factory(rows)
-            else:
-                service = TitleService(self.model.folder, {}, None, None)
-                report = service.apply_rows(rows, dry_run=False)
+            report, log_error = self._apply_worker_impl(rows)
+        except Exception as exc:  # noqa: BLE001 - shown to the user
+            self.call_from_thread(self._apply_failed, exc)
+            return
+        self.call_from_thread(self._apply_done, report, log_error)
+
+    def _apply_worker_impl(self, rows: list[PreviewRow]) -> tuple[ApplyReport, str]:
+        """Переименовывает строки; сбой журнала не отменяет результат apply."""
+        if self._apply_factory is not None:
+            return self._apply_factory(rows), ""
+        service = TitleService(self.model.folder, {}, None, None)
+        report = service.apply_rows(rows, dry_run=False)
+        log_error = ""
+        if any(result.status == "renamed" for result in report.results):
+            try:
                 append_rename_log(
-                    "rename_log.csv",
+                    str(LOG_PATH),
                     rows,
                     report.results,
                     datetime.now(timezone.utc).isoformat(),
                 )
-        except Exception as exc:  # noqa: BLE001 - shown to the user
-            self.call_from_thread(self._apply_failed, exc)
-            return
-        self.call_from_thread(self._apply_done, report)
+            except Exception as exc:  # noqa: BLE001 - log must not hide result
+                log_error = str(exc) or exc.__class__.__name__
+        return report, log_error
 
-    def _apply_done(self, report: ApplyReport) -> None:
+    def _apply_done(self, report: ApplyReport, log_error: str = "") -> None:
         self._set_busy(False)
-        self.model.set_rows([])
+        renamed = {
+            result.old_rel
+            for result in report.results
+            if result.status == "renamed"
+        }
+        kept = [
+            row for row in self.model.rows
+            if not row.approved or row.old_rel not in renamed
+        ]
+        self.model.set_rows(kept)
         self._refresh_table()
-        self._set_status("Применено")
-        self.push_screen(ApplyResultModal(report))
+        if log_error:
+            self._set_status("Переименовано, но журнал не записан")
+            self.notify(
+                f"Журнал не записан: {log_error}",
+                severity="warning",
+                timeout=10,
+            )
+        elif report.had_errors and kept:
+            self._set_status(
+                f"Применено: {len(renamed)}; строк с ошибками осталось: "
+                f"{len(kept)}"
+            )
+        else:
+            self._set_status(f"Применено: {len(renamed)}")
+        self.push_screen(
+            ApplyResultModal(
+                report, log_path=str(LOG_PATH), log_error=log_error
+            )
+        )
 
     def _apply_failed(self, exc: Exception) -> None:
         self._set_busy(False)

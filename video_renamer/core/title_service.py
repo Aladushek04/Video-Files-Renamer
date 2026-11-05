@@ -167,6 +167,11 @@ def _extension(name: str) -> str:
     return os.path.splitext(name)[1].lower()
 
 
+def _relative_parent(value: str) -> str:
+    """Папка относительного пути по правилам Windows."""
+    return ntpath.dirname(ntpath.normpath(value))
+
+
 def _inside_root(path: str, root_real: str) -> bool:
     """Лежит ли путь внутри корня после нормализации."""
     try:
@@ -556,12 +561,13 @@ class TitleService:
                 or not _inside_root(old_path, root_real)
                 or not _inside_root(new_path, root_real)):
             return None, "path escapes root"
-        if (os.path.dirname(new_rel) or ntpath.dirname(new_rel)
-                or "/" in new_rel or "\\" in new_rel):
-            return None, "new path must not contain subdirectories"
+        if (ntpath.normcase(_relative_parent(old_rel))
+                != ntpath.normcase(_relative_parent(new_rel))):
+            return None, "new path must stay in the old file's folder"
 
-        new_stem = os.path.splitext(new_rel)[0]
-        if len(new_rel) > _MAX_FULL_NAME:
+        new_name = ntpath.basename(new_rel)
+        new_stem = ntpath.splitext(new_name)[0]
+        if len(new_name) > _MAX_FULL_NAME:
             return None, "new name exceeds 255 characters"
         if not is_valid_final_stem(new_stem):
             return None, "invalid new name"

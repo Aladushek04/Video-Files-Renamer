@@ -173,7 +173,8 @@ ModalScreen {
 #result-dialog,
 #candidate-dialog,
 #name-dialog,
-#studio-dialog {
+#studio-dialog,
+#quit-dialog {
     width: 72;
     height: 80%;
     background: #0f172a;
@@ -183,7 +184,8 @@ ModalScreen {
 
 #confirm-dialog,
 #name-dialog,
-#result-dialog {
+#result-dialog,
+#quit-dialog {
     height: auto;
 }
 

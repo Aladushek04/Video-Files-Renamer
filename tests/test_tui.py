@@ -13,7 +13,13 @@ from video_renamer.core.stashdb_client import (  # noqa: E402
     Scene,
     Studio,
 )
-from video_renamer.core.title_service import PreviewReport, PreviewRow  # noqa: E402
+from video_renamer.core.oshash import oshash_from_path  # noqa: E402
+from video_renamer.core.title_service import (  # noqa: E402
+    ApplyReport,
+    ApplyResult,
+    PreviewReport,
+    PreviewRow,
+)
 from video_renamer.tui import RenamerApp  # noqa: E402
 
 ROWS = (
@@ -104,6 +110,240 @@ def test_app_apply_modal_runs_fake_apply(tmp_path):
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert app.screen.query_one("#result-dialog")
+
+    asyncio.run(run())
+
+
+def test_confirm_apply_explains_rename_is_irreversible(tmp_path):
+    async def run() -> None:
+        app = RenamerApp(
+            folder=str(tmp_path),
+            preview_factory=lambda folder, progress: PreviewReport(
+                rows=ROWS, warnings=(), had_transient_errors=False
+            ),
+        )
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#preview")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.click("#apply")
+            await pilot.pause()
+            body = str(app.screen.query_one("#confirm-body").render())
+            assert "нельзя" in body
+            assert "без rename_log" not in body
+
+    asyncio.run(run())
+
+
+def test_apply_log_failure_does_not_hide_results(tmp_path, monkeypatch):
+    import video_renamer.tui as tui_module
+
+    def broken_log(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(tui_module, "append_rename_log", broken_log)
+    video = tmp_path / "old1.mp4"
+    video.write_bytes(b"abcdefghij")
+    row = PreviewRow(
+        True, "old1.mp4", "new1.mp4", "fingerprint", 1.0, "s1", "",
+        oshash_from_path(str(video)), 10,
+    )
+
+    async def run() -> None:
+        app = RenamerApp(
+            folder=str(tmp_path),
+            preview_factory=lambda folder, progress: PreviewReport(
+                rows=(row,), warnings=(), had_transient_errors=False
+            ),
+        )
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#preview")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.click("#apply")
+            await pilot.pause()
+            await pilot.click("#confirm-apply")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert (tmp_path / "new1.mp4").exists()
+            assert app.screen.query_one("#result-dialog")
+            assert "disk full" in str(app.screen.query_one("#log-error").render())
+
+    asyncio.run(run())
+
+
+def test_apply_keeps_failed_rows_for_retry(tmp_path):
+    rows = (
+        PreviewRow(True, "ok.mp4", "ok-new.mp4", "fingerprint", 1.0, "s1",
+                   "", "h1", 10),
+        PreviewRow(True, "bad.mp4", "bad-new.mp4", "text", 0.8, "s2",
+                   "", "h2", 10),
+        PreviewRow(False, "pending.mp4", "pending-new.mp4", "heuristic",
+                   0.0, "", "", "h3", 10),
+    )
+    report = ApplyReport(
+        results=(
+            ApplyResult("ok.mp4", "ok-new.mp4", "renamed", ""),
+            ApplyResult("bad.mp4", "bad-new.mp4", "error", "target is occupied"),
+        ),
+        had_errors=True,
+    )
+
+    async def run() -> None:
+        app = RenamerApp(
+            folder=str(tmp_path),
+            preview_factory=lambda folder, progress: PreviewReport(
+                rows=rows, warnings=(), had_transient_errors=False
+            ),
+            apply_factory=lambda approved: report,
+        )
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#preview")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.click("#apply")
+            await pilot.pause()
+            await pilot.click("#confirm-apply")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert [row.old_rel for row in app.model.rows] == [
+                "bad.mp4", "pending.mp4"
+            ]
+            assert app.model.rows[0].approved is True
+            assert app.query_one("#table").row_count == 2
+
+    asyncio.run(run())
+
+
+def test_tui_finds_project_data_outside_project_cwd(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            status = str(app.query_one("#db-status").render())
+            assert "не найден" not in status
+
+    asyncio.run(run())
+
+
+def test_table_fits_recommended_window(tmp_path):
+    async def run() -> None:
+        app = RenamerApp(
+            folder=str(tmp_path),
+            preview_factory=lambda folder, progress: PreviewReport(
+                rows=ROWS, warnings=(), had_transient_errors=False
+            ),
+        )
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#preview")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            table = app.query_one("#table")
+            assert table.virtual_size.width <= table.size.width
+
+    asyncio.run(run())
+
+
+def test_busy_blocks_edit_and_approval(tmp_path):
+    async def run() -> None:
+        app = RenamerApp(
+            folder=str(tmp_path),
+            preview_factory=lambda folder, progress: PreviewReport(
+                rows=ROWS_WITH_CANDIDATES,
+                warnings=(),
+                had_transient_errors=False,
+            ),
+        )
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#preview")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.model.rows[0].approved is True
+            app._set_busy(True)
+            app.action_toggle()
+            app.action_edit()
+            await pilot.pause()
+            assert app.model.rows[0].approved is True
+            assert not app.query("#name-dialog")
+            for selector in (
+                "#browse", "#folder", "#filter", "#approve", "#reject",
+                "#edit", "#candidates", "#studios", "#preview", "#apply",
+            ):
+                assert app.query_one(selector).disabled, selector
+
+    asyncio.run(run())
+
+
+def test_quit_asks_before_discarding_rows(tmp_path):
+    async def run() -> None:
+        app = RenamerApp(
+            folder=str(tmp_path),
+            preview_factory=lambda folder, progress: PreviewReport(
+                rows=ROWS, warnings=(), had_transient_errors=False
+            ),
+        )
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#preview")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.press("q")
+            await pilot.pause()
+            assert app.screen.query_one("#quit-dialog")
+            await pilot.click("#quit-cancel")
+            await pilot.pause()
+            assert not app.query("#quit-dialog")
+            assert len(app.model.rows) == 3
+
+    asyncio.run(run())
+
+
+def test_name_editor_accepts_uppercase_extension(tmp_path):
+    async def run() -> None:
+        app = RenamerApp(
+            folder=str(tmp_path),
+            preview_factory=lambda folder, progress: PreviewReport(
+                rows=ROWS, warnings=(), had_transient_errors=False
+            ),
+        )
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#preview")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.click("#table")
+            await pilot.click("#edit")
+            await pilot.pause()
+            app.screen.query_one("#new-name").value = "Custom.MP4"
+            await pilot.click("#name-save")
+            await pilot.pause()
+            assert app.model.rows[0].new_rel == "Custom.MP4"
+            assert app.model.rows[0].approved is True
+
+    asyncio.run(run())
+
+
+def test_name_editor_reports_too_long_name(tmp_path):
+    async def run() -> None:
+        app = RenamerApp(
+            folder=str(tmp_path),
+            preview_factory=lambda folder, progress: PreviewReport(
+                rows=ROWS, warnings=(), had_transient_errors=False
+            ),
+        )
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#preview")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.click("#table")
+            await pilot.click("#edit")
+            await pilot.pause()
+            app.screen.query_one("#new-name").value = "x" * 252 + ".mp4"
+            await pilot.click("#name-save")
+            await pilot.pause()
+            message = str(app.screen.query_one("#name-error").render())
+            assert "255" in message
+            assert "Windows" not in message
 
     asyncio.run(run())
 

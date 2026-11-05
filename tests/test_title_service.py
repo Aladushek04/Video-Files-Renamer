@@ -570,6 +570,36 @@ def test_apply_renames_approved_and_skips_rest(tmp_path):
     assert report.results[1].status == "skipped"
 
 
+def test_apply_keeps_file_in_same_subdirectory(tmp_path):
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "a.mp4").write_bytes(b"abc")
+
+    report = apply_service(tmp_path).apply_rows([
+        row(os.path.join("sub", "a.mp4"), os.path.join("sub", "b.mp4")),
+    ], dry_run=False)
+
+    assert report.had_errors is False
+    assert (sub / "b.mp4").exists()
+
+
+def test_apply_rejects_moving_to_another_subdirectory(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    (first / "a.mp4").write_bytes(b"abc")
+
+    report = apply_service(tmp_path).apply_rows([
+        row(os.path.join("first", "a.mp4"),
+            os.path.join("second", "b.mp4")),
+    ], dry_run=False)
+
+    assert report.had_errors is True
+    assert (first / "a.mp4").exists()
+    assert not (second / "b.mp4").exists()
+
+
 def test_apply_rejects_path_traversal(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"abc")
     service = TitleService(str(tmp_path), {}, None, None,
