@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from video_renamer import studio_tasks
+from video_renamer.ui import studio_tasks
 
 
 def test_run_captures_child_output(monkeypatch):

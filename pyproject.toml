@@ -33,17 +33,17 @@ dev = ["pytest>=8"]
 
 [project.scripts]
 video-renamer = "video_renamer.cli:main"
-video-renamer-tui = "video_renamer.tui:main"
+video-renamer-tui = "video_renamer.ui.tui:main"
 scrape-stashdb = "video_renamer.scrapers.stashdb:main"
 scrape-fansdb = "video_renamer.scrapers.fansdb:main"
 scrape-theporndb = "video_renamer.scrapers.theporndb:main"
-merge-studios = "video_renamer.merge_studios:main"
+merge-studios = "video_renamer.scrapers.merge_studios:main"
 
 [tool.setuptools.packages.find]
 include = ["video_renamer*"]
 
 [tool.setuptools.package-data]
-video_renamer = ["tui.tcss"]
+"video_renamer.ui" = ["tui.tcss"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

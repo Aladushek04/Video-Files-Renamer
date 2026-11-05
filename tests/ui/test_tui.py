@@ -20,7 +20,7 @@ from video_renamer.core.title_service import (  # noqa: E402
     PreviewReport,
     PreviewRow,
 )
-from video_renamer.tui import RenamerApp  # noqa: E402
+from video_renamer.ui.tui import RenamerApp  # noqa: E402
 
 ROWS = (
     PreviewRow(
@@ -166,7 +166,7 @@ def test_undo_confirmed_restores_file(tmp_path):
 def test_undo_screen_survives_unreadable_log(tmp_path, monkeypatch):
     import csv as csv_module
 
-    from video_renamer import tui as tui_module
+    from video_renamer.ui import tui as tui_module
 
     def broken(path):
         raise csv_module.Error("line too long")
@@ -187,7 +187,7 @@ def test_undo_screen_survives_unreadable_log(tmp_path, monkeypatch):
 
 
 def test_undo_worker_error_is_shown_not_fatal(tmp_path, monkeypatch):
-    from video_renamer import tui as tui_module
+    from video_renamer.ui import tui as tui_module
     from video_renamer.core.undo import run_undo as real_run_undo
 
     def failing(selection, *, log_path, dry_run, now=None):
@@ -219,7 +219,7 @@ def test_undo_worker_error_is_shown_not_fatal(tmp_path, monkeypatch):
 
 
 def test_undo_shows_unwritten_journal_rows(tmp_path, monkeypatch):
-    from video_renamer import tui as tui_module
+    from video_renamer.ui import tui as tui_module
     from video_renamer.core.undo import UndoReport, UndoResult
     from video_renamer.core.undo import run_undo as real_run_undo
 
@@ -255,7 +255,7 @@ def test_undo_shows_unwritten_journal_rows(tmp_path, monkeypatch):
 
 
 def test_undo_screen_ignores_callbacks_after_close(tmp_path):
-    from video_renamer.tui import UndoLogScreen
+    from video_renamer.ui.tui import UndoLogScreen
 
     screen = UndoLogScreen(str(tmp_path / "x.csv"), str(tmp_path))
     screen._undo_done(1, [])
@@ -336,7 +336,7 @@ def test_confirm_apply_explains_rename_is_irreversible(tmp_path):
 
 
 def test_apply_log_failure_does_not_hide_results(tmp_path, monkeypatch):
-    import video_renamer.tui as tui_module
+    import video_renamer.ui.tui as tui_module
 
     def broken_log(*args, **kwargs):
         raise OSError("disk full")
@@ -629,7 +629,7 @@ def test_candidate_picker_chooses_alternative(tmp_path):
 
 
 def test_studio_dialog_runs_task(tmp_path, monkeypatch):
-    import video_renamer.tui as tui_module
+    import video_renamer.ui.tui as tui_module
 
     seen = []
 
@@ -658,7 +658,7 @@ def test_studio_dialog_runs_task(tmp_path, monkeypatch):
 
 
 def test_studio_dialog_cancels_task(tmp_path, monkeypatch):
-    import video_renamer.tui as tui_module
+    import video_renamer.ui.tui as tui_module
 
     started = threading.Event()
 

@@ -60,8 +60,8 @@ from video_renamer.paths import (
     STUDIOS_PATH,
     load_project_env,
 )
-from video_renamer.studio_tasks import run as run_studio_task
-from video_renamer.tui_model import FILTERS, ReviewModel
+from video_renamer.ui.studio_tasks import run as run_studio_task
+from video_renamer.ui.tui_model import FILTERS, ReviewModel
 
 SOURCE_LABELS = {
     "fingerprint": "Fingerprint",

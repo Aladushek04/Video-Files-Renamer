@@ -20,7 +20,7 @@ if errorlevel 1 (
     if errorlevel 1 goto error
 )
 
-".venv\Scripts\python.exe" -m video_renamer.tui %*
+".venv\Scripts\python.exe" -m video_renamer.ui.tui %*
 if errorlevel 1 pause
 exit /b 0
 

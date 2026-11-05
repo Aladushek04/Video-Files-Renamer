@@ -1,5 +1,5 @@
 """Тесты модели TUI без зависимости от Textual."""
-from video_renamer.tui_model import ReviewModel
+from video_renamer.ui.tui_model import ReviewModel
 from video_renamer.core.title_service import PreviewRow
 
 
