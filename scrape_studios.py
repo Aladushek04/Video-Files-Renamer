@@ -319,12 +319,15 @@ def run_scrape(
         [StashDBClient, int, int], tuple[list[Studio], int]
     ] = fetch_studios_page,
     on_page: Callable[[int, list[Studio], int], None] | None = None,
+    allow_empty_tail: bool = False,
 ) -> ScrapeReport:
     """Листает студии с `start_page`, дедуплицируя по `Studio.id`.
 
     `count` берётся из каждого ответа. Пустая страница при
-    `len(studios) < count` — `ScraperGapError`. `max_pages` ограничивает
-    число сетевых страниц и оставляет `complete=False`. `on_page(page,
+    `len(studios) < count` — `ScraperGapError`, кроме последней страницы при
+    `allow_empty_tail=True`: источник может сообщить count на несколько
+    записей больше, чем реально отдаёт. `max_pages` ограничивает число
+    сетевых страниц и оставляет `complete=False`. `on_page(page,
     page_studios, count)` вызывается после каждой успешной непустой проверки
     страницы (включая терминальную пустую страницу при `count == 0`).
     """
@@ -347,6 +350,12 @@ def run_scrape(
         pages_fetched += 1
 
         if not page_studios and len(studios) < count:
+            if allow_empty_tail and studios and page * per_page >= count:
+                count = len(studios)
+                if on_page is not None:
+                    on_page(page, [], count)
+                complete = True
+                break
             raise ScraperGapError(
                 f"page {page} is empty, but only {len(studios)} of "
                 f"{count} studios were collected"
@@ -428,6 +437,11 @@ def _build_parser(
                         help="ignore and (with --apply) delete checkpoint/raw")
     parser.add_argument("--no-filter", action="store_true",
                         help="keep generated/placeholder studio names too")
+    parser.add_argument(
+        "--allow-empty-tail", action="store_true",
+        help="accept an empty last page when the reported count is a few "
+             "records too high",
+    )
     return parser
 
 
@@ -590,6 +604,7 @@ def main(
                 max_pages=args.max_pages,
                 initial=initial,
                 on_page=on_page,
+                allow_empty_tail=args.allow_empty_tail,
             )
         except StashDBAuthError as exc:
             print(

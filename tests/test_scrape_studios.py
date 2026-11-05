@@ -119,6 +119,25 @@ def test_empty_page_inside_count_raises():
         run_scrape(None, start_page=1, per_page=2, max_pages=None, fetch=fetch)
 
 
+def test_empty_last_page_can_be_accepted_on_count_drift():
+    pages = {
+        1: ([Studio("1", "Alpha")], 2),
+        2: ([], 2),
+    }
+
+    def fetch(client, page, per_page):
+        return pages[page]
+
+    with pytest.raises(ScraperGapError):
+        run_scrape(None, start_page=1, per_page=1, max_pages=None,
+                   fetch=fetch)
+
+    report = run_scrape(None, start_page=1, per_page=1, max_pages=None,
+                        fetch=fetch, allow_empty_tail=True)
+    assert report.complete is True
+    assert [s.name for s in report.studios] == ["Alpha"]
+
+
 def test_empty_page_at_zero_count_completes():
     def fetch(client, page, per_page):
         return [], 0
