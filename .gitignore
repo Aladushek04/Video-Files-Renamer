@@ -30,6 +30,8 @@ studios_collisions.json
 studios_collisions*.json
 studios_*_collisions.json
 studios.json.bak
+studios_fansdb.json
+studios_theporndb.json
 *.bak
 
 # --- Секреты (ключи из переменной окружения или .env) ---

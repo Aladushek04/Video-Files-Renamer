@@ -20,10 +20,12 @@ preview».
 
 | Файл | Назначение |
 |---|---|
+| `start.bat` | дружелюбный запуск: выбрать папку, preview, открыть CSV, apply |
 | `fix_video_titles.py` | `preview` (собрать предложения) и `apply` (применить одобренное) |
 | `scrape_studios.py` | выгружает справочник студий StashDB в `studios.json` |
 | `scrape_fansdb_studios.py` | выгружает студии FansDB в `studios_fansdb.json` |
 | `scrape_theporndb_studios.py` | обогащает известные имена студиями ThePornDB через `findStudio` |
+| `merge_studios_files.py` | сливает несколько JSON-справочников в один, первый вариант побеждает |
 | `title_service.py` | сервисный слой без `print`/`argparse` — общий вход для CLI и будущего TUI |
 | `title_matcher.py` | разбор локального имени, скоринг кандидатов, сборка итогового имени |
 | `title_cache.py` | локальный SQLite-кэш ответов StashDB |
@@ -76,15 +78,25 @@ $env:STASHDB_API_KEY = "ваш-ключ"
 
 ## Быстрый старт
 
+Самый простой путь — запустить `start.bat`, выбрать папку с видео и следовать
+меню:
+
+1. **Preview** — собрать предложения, ничего не переименовывая;
+2. открыть `preview.csv`, проверить `approved` и `new`;
+3. **Preview + применить после ревью** — применить только одобренное.
+
 ### 1. Обновить справочник студий
 
-Нужен один раз (и потом изредка): полный справочник студий StashDB заметно
-улучшает распознавание имён в эвристике. Сейчас в репозитории лежит
-небольшой ручной список (`studios.json`), а скрапер дописывает в него всё,
-что отдаёт API, не затирая ручные записи.
+Нужен один раз (и потом изредка): полный справочник студий заметно улучшает
+распознавание имён в эвристике. В репозитории уже лежит объединённый
+`studios.json` из StashDB, FansDB и ThePornDB (около 355 тысяч ключей).
+Отдельные источники можно обновлять скраперами, а затем сливать:
 
 ```powershell
 python scrape_studios.py --apply
+python scrape_fansdb_studios.py --apply
+python scrape_theporndb_studios.py --apply
+python merge_studios_files.py studios.json studios_fansdb.json studios_theporndb.json --out studios.json --apply
 ```
 
 ### 2. Собрать предложения по именам
@@ -408,6 +420,16 @@ FansDB содержит очень много пользовательских �
 `4based`, `XArt` и `SXT0229` остаются. На первых 500 студиях FansDB фильтр
 отбросил 165 записей и оставил 335. Отключить фильтр можно флагом
 `--no-filter` (например, если нужен полный сырой список).
+
+### Слияние справочников
+
+```powershell
+python merge_studios_files.py studios.json studios_fansdb.json studios_theporndb.json --out studios.json --apply
+```
+
+Слияние аддитивное: первый встреченный вариант имени побеждает, существующие
+записи не перезаписываются, а альтернативные написания попадают в
+`studios_collisions.json`. Без `--apply` — dry-run.
 
 ---
 
