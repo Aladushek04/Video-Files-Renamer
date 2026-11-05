@@ -156,6 +156,8 @@ python -m video_renamer.cli apply preview.csv --root D:\Videos\PH --apply
 python -m video_renamer.cli preview <каталог> [--csv preview.csv] [--recursive]
                                  [--limit N] [--no-text] [--offline]
                                  [--refresh] [--studios PATH] [--cache PATH]
+                                 [--phash] [--ffmpeg PATH] [--ffprobe PATH]
+                                 [--no-secondary]
 ```
 
 | Флаг | Что делает |
@@ -168,6 +170,15 @@ python -m video_renamer.cli preview <каталог> [--csv preview.csv] [--recu
 | `--refresh` | игнорировать кэш и заново спросить StashDB |
 | `--studios PATH` | справочник студий (по умолчанию `data/studios.json` в корне проекта) |
 | `--cache PATH` | файл SQLite-кэша (по умолчанию `cache/title_fixer.sqlite3` в корне проекта) |
+| `--phash` | дополнительно искать по PHASH для файлов без OSHASH-совпадения; запускает ffmpeg на каждый файл, медленно |
+| `--ffmpeg PATH` | путь к ffmpeg (по умолчанию переменная `FFMPEG_PATH` или `PATH`) |
+| `--ffprobe PATH` | путь к ffprobe (по умолчанию переменная `FFPROBE_PATH` или `PATH`) |
+| `--no-secondary` | не опрашивать ThePornDB и FansDB (только StashDB) |
+
+Фингерпринты ищутся в StashDB, ThePornDB и FansDB. Ключи: `STASHDB_API_KEY`,
+`THE_PORNDB_API_KEY`, `FANSDB_API_KEY`; вторичный источник без ключа
+пропускается. Без ключа StashDB работа идёт офлайн, как раньше, даже если
+заданы ключи вторичных источников. Совпадение по PHASH всегда требует ревью.
 
 Пути по умолчанию для `--studios` и `--cache` привязаны к корню проекта, а не
 к текущей папке запуска: `video-renamer preview` из любого каталога видит тот
@@ -177,8 +188,9 @@ python -m video_renamer.cli preview <каталог> [--csv preview.csv] [--recu
 
 1. обход каталога → отбор видео по расширению;
 2. размер файла + OSHASH (читаются только первые и последние 64 КиБ);
-3. поиск сцены по OSHASH батчами (ответы берутся из кэша, если он есть);
-4. если отпечаток ничего не дал — текстовый поиск по очищенному остатку имени;
+3. поиск сцены по OSHASH батчами в StashDB, ThePornDB и FansDB (ответы берутся из кэша, если он есть);
+3а. с `--phash`: если OSHASH ничего не дал — PHASH (25 кадров ffmpeg) и поиск по нему в тех же источниках;
+4. если отпечаток ничего не дал — текстовый поиск по очищенному остатку имени (только StashDB);
 5. если и это не дал уверенного совпадения — эвристика `clean_ph_names`.
 
 `preview` **никогда** не переименовывает файлы.
