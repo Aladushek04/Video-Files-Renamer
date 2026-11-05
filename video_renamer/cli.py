@@ -33,7 +33,7 @@ from video_renamer.core.stashdb_client import (
 )
 from video_renamer.core.title_cache import TitleCache
 from video_renamer.core.title_service import ApplyResult, PreviewRow, TitleService
-from video_renamer.paths import CACHE_PATH, STUDIOS_PATH, load_project_env
+from video_renamer.paths import CACHE_PATH, LOG_PATH, STUDIOS_PATH, load_project_env
 
 __all__ = [
     "append_rename_log",
@@ -51,7 +51,7 @@ _APPROVED_VALUES = frozenset({"y", "yes", "1", "true"})
 _FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 DEFAULT_CSV = "preview.csv"
-DEFAULT_LOG = "rename_log.csv"
+DEFAULT_LOG = str(LOG_PATH)
 DEFAULT_STUDIOS = str(STUDIOS_PATH)
 DEFAULT_CACHE = str(CACHE_PATH)
 

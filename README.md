@@ -143,8 +143,8 @@ python -m video_renamer.cli apply preview.csv --root D:\Videos\PH
 python -m video_renamer.cli apply preview.csv --root D:\Videos\PH --apply
 ```
 
-Переименуются только строки с `approved=y`. В `rename_log.csv` попадает
-журнал фактически выполненных переименований.
+Переименуются только строки с `approved=y`. В `rename_log.csv` (по умолчанию
+в корне проекта) попадает журнал фактически выполненных переименований.
 
 ---
 
@@ -187,7 +187,7 @@ python -m video_renamer.cli preview <каталог> [--csv preview.csv] [--recu
 
 ```text
 python -m video_renamer.cli apply <csv> --root <каталог> [--apply]
-                                [--log rename_log.csv] [--force]
+                                [--log PATH] [--force]
                                 [--suffix-collisions]
 ```
 
@@ -195,7 +195,7 @@ python -m video_renamer.cli apply <csv> --root <каталог> [--apply]
 |---|---|
 | `--root PATH` | **обязателен**: каталог, относительно которого считаются `old`/`new` из CSV |
 | `--apply` | реально переименовывать; без него — dry-run (печать плана) |
-| `--log PATH` | журнал переименований (по умолчанию `rename_log.csv`) |
+| `--log PATH` | журнал переименований (по умолчанию `rename_log.csv` в корне проекта) |
 | `--force` | отключить проверки размера и OSHASH (осторожно) |
 | `--suffix-collisions` | при занятой цели добавлять ` (2)`, ` (3)` вместо ошибки |
 

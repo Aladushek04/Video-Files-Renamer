@@ -626,7 +626,7 @@ class RenamerApp(App[None]):
         self._busy = busy
         for selector in (
             "#preview", "#studios", "#browse", "#approve", "#reject",
-            "#apply", "#filter",
+            "#filter",
         ):
             self.query_one(selector).disabled = busy
         self.query_one("#folder", Input).disabled = busy
@@ -660,9 +660,6 @@ class RenamerApp(App[None]):
             style="dim",
         )
         self.query_one("#stats", Static).update(text)
-        self.query_one("#apply", Button).disabled = (
-            self._busy or not self.model.approved_rows()
-        )
         self._update_action_state()
 
     def _update_action_state(self) -> None:
@@ -671,6 +668,9 @@ class RenamerApp(App[None]):
         self.query_one("#edit", Button).disabled = self._busy or row is None
         self.query_one("#candidates", Button).disabled = (
             self._busy or row is None or not bool(row.candidates)
+        )
+        self.query_one("#apply", Button).disabled = (
+            self._busy or not self.model.approved_rows()
         )
 
     def _update_detail(self, index: int) -> None:

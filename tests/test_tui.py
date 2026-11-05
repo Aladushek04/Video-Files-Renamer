@@ -276,6 +276,22 @@ def test_busy_blocks_edit_and_approval(tmp_path):
     asyncio.run(run())
 
 
+def test_preview_failure_keeps_apply_disabled(tmp_path):
+    def boom(folder, progress):
+        raise RuntimeError("boom")
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), preview_factory=boom)
+        async with app.run_test(size=(140, 40)) as pilot:
+            assert app.query_one("#apply").disabled is True
+            await pilot.click("#preview")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.query_one("#apply").disabled is True
+
+    asyncio.run(run())
+
+
 def test_quit_asks_before_discarding_rows(tmp_path):
     async def run() -> None:
         app = RenamerApp(

@@ -142,6 +142,14 @@ def test_preview_defaults_are_independent_of_cwd(tmp_path, monkeypatch):
     assert Path(seen["cache"]).is_absolute()
 
 
+def test_apply_default_log_is_project_anchored(tmp_path):
+    args = fix_video_titles._build_parser().parse_args([
+        "apply", "preview.csv", "--root", str(tmp_path),
+    ])
+    assert Path(args.log).is_absolute()
+    assert Path(args.log).name == "rename_log.csv"
+
+
 def test_preview_reads_api_key_from_dotenv(tmp_path, monkeypatch):
     seen = {}
 
