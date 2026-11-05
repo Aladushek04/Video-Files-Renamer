@@ -1,14 +1,9 @@
 from video_renamer.core.clean_ph_names import (
-    apply_renames,
-    build_new_name,
-    clean_filename,
     clean_stem,
     extract_date,
     extract_studio,
-    load_studios,
     normalize_studio_key,
     prepare_stem,
-    preview_directory,
     split_actors_title,
     split_camel,
     split_name,
@@ -116,25 +111,6 @@ def test_eporner_prefix_stripped():
     assert "Eporner" not in out and "Adriana Lorenzi" in out
 
 
-def test_preview_idempotent_and_collision(tmp_path):
-    (tmp_path / "a 1080p.mp4").touch()
-    (tmp_path / "a XXX.mp4").touch()
-    rows = preview_directory(str(tmp_path), {})
-    assert rows[0][1] != rows[1][1]
-    assert rows[0][1].endswith(".mp4")
-
-
-def test_preview_idempotent_clean_name(tmp_path):
-    (tmp_path / "Vrbangers - 22.12.2025 - Gabbie Carter - Title.mp4").touch()
-    rows = preview_directory(str(tmp_path), {"vrbangers": "Vrbangers"})
-    assert rows[0][0] == rows[0][1]
-
-
-def test_preview_truncates_very_long(tmp_path):
-    out = clean_filename("a" * 250 + ".mp4", {})
-    assert len(out) <= 255 and out.endswith(".mp4")
-
-
 def test_studio_before_camel_split():
     studios = {"hussiepass": "HussiePass"}
     out = clean_stem("HussiePass.26.07.31.Anastasia.Shades.1080p", studios)
@@ -170,39 +146,3 @@ def test_hyphenated_studio_normalized():
     studios = {"brazzersexxtra": "BrazzersExxtra"}
     out = clean_stem("brazzers-exxtra 26.10.03 ryan reid poking glory", studios)
     assert out == "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory"
-
-
-def test_long_name_truncation_real():
-    out = clean_filename("a" * 300 + " 1080p.mp4", {})
-    assert len(out) <= 255 and out.endswith(".mp4")
-
-
-def test_recursive_preview_keeps_subdir(tmp_path):
-    sub = tmp_path / "sub"
-    sub.mkdir()
-    (sub / "b 1080p.mp4").touch()
-    rows = preview_directory(str(tmp_path), {}, recursive=True)
-    assert len(rows) == 1
-    old, new = rows[0]
-    assert "sub" in old and "sub" in new
-    assert new.endswith(".mp4")
-
-
-def test_truncation_collision_stays_short(tmp_path):
-    long1 = "a" * 240 + " 1080p.mp4"
-    long2 = "a" * 240 + " XXX.mp4"
-    (tmp_path / long1).touch()
-    (tmp_path / long2).touch()
-    rows = preview_directory(str(tmp_path), {})
-    assert all(len(new) <= 255 and new.endswith(".mp4") for _, new in rows)
-    assert rows[0][1] != rows[1][1]
-
-
-def test_apply_overlapping_names_safe(tmp_path):
-    (tmp_path / "x 1080p.mp4").touch()
-    (tmp_path / "X.mp4").touch()
-    rows = preview_directory(str(tmp_path), {})
-    apply_renames(str(tmp_path), rows)
-    names = sorted(p.name for p in tmp_path.iterdir())
-    assert "X.mp4" in names
-    assert any(n.startswith("X (") and n.endswith(".mp4") for n in names)

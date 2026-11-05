@@ -1,8 +1,6 @@
 """Тесты загрузчика `.env`: парсинг, приоритет окружения, отсутствие файла."""
 import os
 
-import pytest
-
 from video_renamer.core.env_file import load_env_file
 
 

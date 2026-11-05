@@ -8,8 +8,6 @@ from video_renamer.scrapers.theporndb import (
     parse_lookup_response,
     run_lookup,
 )
-from video_renamer.core.stashdb_client import Studio
-
 
 class FakeClient:
     def __init__(self, responses):
