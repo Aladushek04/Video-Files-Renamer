@@ -1,66 +1,117 @@
 """Запуск скраперов и слияния справочников из TUI.
 
-Скраперы остаются обычными CLI-функциями; здесь мы лишь перехватываем их
-вывод и отдаём его построчно в TUI. Сеть, ключи и файлы — как в CLI.
+Операции запускаются отдельными процессами: так их можно отменить из TUI,
+не убивая сам интерфейс. Вывод читается построчно и отдаётся в журнал.
 """
 from __future__ import annotations
 
-import contextlib
+import os
+import queue
+import subprocess
+import sys
+import threading
 from collections.abc import Callable
-
-from video_renamer import merge_studios
-from video_renamer.scrapers import fansdb, stashdb, theporndb
+from pathlib import Path
 
 __all__ = ["run"]
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MERGE_INPUTS = (
     "data/studios.json",
     "data/studios_fansdb.json",
     "data/studios_theporndb.json",
 )
+CANCELLED_CODE = 130
 
 
-class _LineWriter:
-    """Поток, который режет вывод на строки и отдаёт их callback-у."""
+def _command(kind: str) -> list[str]:
+    """Команда процесса для вида операции."""
+    python = sys.executable
+    if kind == "stashdb":
+        return [python, "-m", "video_renamer.scrapers.stashdb", "--apply"]
+    if kind == "fansdb":
+        return [python, "-m", "video_renamer.scrapers.fansdb", "--apply"]
+    if kind == "theporndb":
+        return [python, "-m", "video_renamer.scrapers.theporndb", "--apply"]
+    if kind == "merge":
+        return [
+            python,
+            "-m",
+            "video_renamer.merge_studios",
+            *MERGE_INPUTS,
+            "--out",
+            "data/studios.json",
+            "--apply",
+        ]
+    raise ValueError(f"unknown studio task: {kind}")
 
-    def __init__(self, on_line: Callable[[str], None]) -> None:
-        self._on_line = on_line
-        self._buffer = ""
 
-    def write(self, text: str) -> int:
-        self._buffer += text
-        while "\n" in self._buffer:
-            line, self._buffer = self._buffer.split("\n", 1)
-            if line.strip():
-                self._on_line(line)
-        return len(text)
-
-    def flush(self) -> None:
-        if self._buffer.strip():
-            self._on_line(self._buffer)
-        self._buffer = ""
+def _terminate(process: subprocess.Popen[str]) -> int:
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+    return CANCELLED_CODE
 
 
-def run(kind: str, on_line: Callable[[str], None] | None = None) -> int:
-    """Выполняет `stashdb` / `fansdb` / `theporndb` / `merge` и возвращает код."""
+def run(
+    kind: str,
+    on_line: Callable[[str], None] | None = None,
+    *,
+    cancel_event: threading.Event | None = None,
+) -> int:
+    """Выполняет операцию и возвращает код; 130 — отменено пользователем."""
+    if cancel_event is not None and cancel_event.is_set():
+        return CANCELLED_CODE
+
+    command = _command(kind)
     line_callback = on_line or (lambda _line: None)
-    writer = _LineWriter(line_callback)
-    with contextlib.redirect_stdout(writer), contextlib.redirect_stderr(writer):
-        if kind == "stashdb":
-            code = stashdb.main(["--apply"])
-        elif kind == "fansdb":
-            code = fansdb.main(
-                ["--apply"], source=fansdb.FANSDB_SOURCE
-            )
-        elif kind == "theporndb":
-            code = theporndb.main(["--apply"])
-        elif kind == "merge":
-            code = merge_studios.main([
-                *MERGE_INPUTS,
-                "--out", "data/studios.json",
-                "--apply",
-            ])
-        else:
-            raise ValueError(f"unknown studio task: {kind}")
-    writer.flush()
-    return code
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+
+    process = subprocess.Popen(
+        command,
+        cwd=str(PROJECT_ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+        env=env,
+    )
+    lines: queue.Queue[str | None] = queue.Queue()
+
+    def read_output() -> None:
+        try:
+            assert process.stdout is not None
+            for line in process.stdout:
+                lines.put(line.rstrip("\n"))
+        finally:
+            lines.put(None)
+
+    reader = threading.Thread(target=read_output, daemon=True)
+    reader.start()
+
+    try:
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                return _terminate(process)
+            try:
+                line = lines.get(timeout=0.2)
+            except queue.Empty:
+                if process.poll() is not None and lines.empty():
+                    break
+                continue
+            if line is None:
+                break
+            if line.strip():
+                line_callback(line)
+        return process.wait()
+    finally:
+        if process.poll() is None:
+            _terminate(process)

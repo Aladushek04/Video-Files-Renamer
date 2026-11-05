@@ -1,6 +1,8 @@
 @echo off
 setlocal
 chcp 65001 >nul
+mode con: cols=150 lines=45 >nul 2>&1
+title Video Files Renamer
 cd /d "%~dp0.."
 
 if not exist ".venv\Scripts\python.exe" (

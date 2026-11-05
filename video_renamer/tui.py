@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -329,6 +330,7 @@ class StudioDialog(ModalScreen[None]):
     def __init__(self) -> None:
         super().__init__()
         self._studio_running = False
+        self._cancel_event = threading.Event()
 
     def compose(self) -> ComposeResult:
         with Vertical(id="studio-dialog"):
@@ -336,7 +338,7 @@ class StudioDialog(ModalScreen[None]):
             yield Static(
                 "StashDB — около 5 минут. FansDB — около часа. "
                 "ThePornDB может занять несколько часов. "
-                "Прогресс сохраняется, окно закрывать нельзя до конца.",
+                "Прогресс сохраняется; «Отменить» останавливает процесс.",
                 classes="modal-hint",
             )
             with Horizontal(classes="studio-buttons"):
@@ -347,18 +349,22 @@ class StudioDialog(ModalScreen[None]):
                              variant="primary")
             yield RichLog(id="studio-log", wrap=True)
             with Horizontal(classes="modal-buttons"):
+                yield Button("Отменить", id="studio-cancel",
+                             variant="error", disabled=True)
                 yield Button("Закрыть", id="studio-close")
 
-    def _set_buttons_disabled(self, disabled: bool) -> None:
+    def _set_running(self, running: bool) -> None:
+        self._studio_running = running
         for button in self.query(".studio-buttons Button"):
-            button.disabled = disabled
-        self.query_one("#studio-close", Button).disabled = disabled
+            button.disabled = running
+        self.query_one("#studio-close", Button).disabled = running
+        self.query_one("#studio-cancel", Button).disabled = not running
 
     def _start(self, kind: str) -> None:
         if self._studio_running:
             return
-        self._studio_running = True
-        self._set_buttons_disabled(True)
+        self._cancel_event.clear()
+        self._set_running(True)
         log = self.query_one("#studio-log", RichLog)
         log.clear()
         log.write(Text(f"Запуск: {kind}...", style="bold #38bdf8"))
@@ -370,6 +376,7 @@ class StudioDialog(ModalScreen[None]):
             code = run_studio_task(
                 kind,
                 lambda line: self.app.call_from_thread(self._append_log, line),
+                cancel_event=self._cancel_event,
             )
         except Exception as exc:  # noqa: BLE001 - shown in the log
             self.app.call_from_thread(self._finished, kind, 2, str(exc))
@@ -383,35 +390,48 @@ class StudioDialog(ModalScreen[None]):
             pass
 
     def _finished(self, kind: str, code: int, error: str) -> None:
-        self._studio_running = False
-        self._set_buttons_disabled(False)
+        self._set_running(False)
         log = self.query_one("#studio-log", RichLog)
-        if error:
+        app = self.app
+        if code == 130:
+            log.write(Text("Отменено", style="#fbbf24"))
+            app.notify("Скрапер отменён", severity="warning", timeout=6)
+        elif error:
             log.write(Text(f"Ошибка: {error}", style="#f87171"))
+            app.notify(f"Студии: ошибка ({code})", severity="error", timeout=6)
         else:
             style = "#34d399" if code == 0 else "#f87171"
             log.write(Text(f"Готово: код {code}", style=style))
-        app = self.app
+            app.notify(
+                f"Студии: {kind} завершён" if code == 0
+                else f"Студии: ошибка ({code})",
+                severity="information" if code == 0 else "error",
+                timeout=6,
+            )
         app.invalidate_services()
         app._update_environment()
-        app.notify(
-            f"Студии: {kind} завершён" if code == 0 else f"Студии: ошибка ({code})",
-            severity="information" if code == 0 else "error",
-            timeout=6,
-        )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id
         if button_id == "studio-close":
             self.action_close()
             return
+        if button_id == "studio-cancel":
+            self._cancel_event.set()
+            self.query_one("#studio-cancel", Button).disabled = True
+            self._append_log("Отмена...")
+            return
         kind = self.TASKS.get(button_id or "")
         if kind:
             self._start(kind)
 
+    def on_unmount(self) -> None:
+        if self._studio_running:
+            self._cancel_event.set()
+
     def action_close(self) -> None:
         if self._studio_running:
-            self.notify("Дождитесь завершения операции", severity="warning")
+            self.notify("Сначала нажмите «Отменить»", severity="warning")
             return
         self.dismiss(None)
 
@@ -422,6 +442,8 @@ class RenamerApp(App[None]):
     CSS_PATH = "tui.tcss"
     TITLE = "Video Files Renamer"
     SUB_TITLE = "StashDB · FansDB · ThePornDB"
+    MIN_WIDTH = 140
+    MIN_HEIGHT = 40
     BINDINGS = [
         Binding("q", "quit", "Выход"),
         Binding("p", "preview", "Preview"),
@@ -448,6 +470,7 @@ class RenamerApp(App[None]):
         self._busy = False
         self.key = ""
         self._service: TitleService | None = None
+        self._size_warned = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -489,6 +512,22 @@ class RenamerApp(App[None]):
                     total=100, show_eta=False, id="progress"
                 )
         yield Footer()
+
+    def on_resize(self, event) -> None:
+        too_small = (
+            event.size.width < self.MIN_WIDTH
+            or event.size.height < self.MIN_HEIGHT
+        )
+        if too_small and not self._size_warned:
+            self.notify(
+                f"Увеличьте окно минимум до "
+                f"{self.MIN_WIDTH}×{self.MIN_HEIGHT} символов",
+                severity="warning",
+                timeout=8,
+            )
+            self._size_warned = True
+        elif not too_small:
+            self._size_warned = False
 
     def on_mount(self) -> None:
         load_env_file()

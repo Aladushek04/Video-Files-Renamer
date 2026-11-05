@@ -1,5 +1,7 @@
 """Headless smoke-тесты Textual-интерфейса (нужен textual)."""
 import asyncio
+import threading
+import time
 from dataclasses import replace
 
 import pytest
@@ -175,7 +177,7 @@ def test_studio_dialog_runs_task(tmp_path, monkeypatch):
 
     seen = []
 
-    def fake_task(kind, on_line):
+    def fake_task(kind, on_line, cancel_event=None):
         seen.append(kind)
         on_line("fake studio output")
         return 0
@@ -192,6 +194,39 @@ def test_studio_dialog_runs_task(tmp_path, monkeypatch):
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert seen == ["stashdb"]
+            await pilot.click("#studio-close")
+            await pilot.pause()
+            assert not app.query("#studio-dialog")
+
+    asyncio.run(run())
+
+
+def test_studio_dialog_cancels_task(tmp_path, monkeypatch):
+    import video_renamer.tui as tui_module
+
+    started = threading.Event()
+
+    def fake_task(kind, on_line, cancel_event=None):
+        started.set()
+        while not cancel_event.is_set():
+            time.sleep(0.02)
+        return 130
+
+    monkeypatch.setattr(tui_module, "run_studio_task", fake_task)
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#studios")
+            await pilot.pause()
+            await pilot.click("#studio-stashdb")
+            await asyncio.wait_for(asyncio.to_thread(started.wait), 2)
+            await pilot.click("#studio-cancel")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            screen = app.screen
+            assert screen.query_one("#studio-close").disabled is False
+            assert screen.query_one("#studio-cancel").disabled is True
             await pilot.click("#studio-close")
             await pilot.pause()
             assert not app.query("#studio-dialog")
