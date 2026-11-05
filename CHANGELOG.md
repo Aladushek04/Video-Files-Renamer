@@ -25,6 +25,22 @@
 
 - Формат `rename_log.csv`: добавлены колонки `action`, `undoes`, `root`, `size`.
   Старый файл переносится в `rename_log.legacy.csv` при первой записи.
+- Структура проекта: интерфейс перенесён в `video_renamer/ui/` (`tui.py`,
+  `tui_model.py`, `studio_tasks.py`, `tui.tcss`), слияние справочников — в
+  `video_renamer/scrapers/merge_studios.py`. Тесты разложены по `tests/core`,
+  `tests/scrapers`, `tests/ui`, `tests/cli`. Релизные заметки — в `docs/releases/`.
+  Точки входа `video-renamer`, `video-renamer-tui`, `merge-studios` не изменились;
+  изменились пути для `python -m`: `video_renamer.ui.tui`,
+  `video_renamer.scrapers.merge_studios`.
+- README переписан: быстрый старт для Windows, безопасность, справка по командам.
+
+### Удалено
+
+- Старый CLI `python -m video_renamer.core.clean_ph_names` с массовым
+  переименованием: он переименовывал все строки без одобрения и без проверки
+  отпечатка. Используйте `video-renamer apply`. Функции очистки имён
+  (`clean_stem` и др.) остаются: ими пользуется матчер.
+- Неиспользуемые импорты в тестах.
 
 ### Исправлено
 
