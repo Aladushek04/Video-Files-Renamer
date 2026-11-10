@@ -16,6 +16,7 @@ CLI выгружает все студии постранично, сохран�
 - `2` — фатальная ошибка: нет ключа, ошибка авторизации/запроса, разрыв
   пагинации, несовпадение `per_page` с checkpoint или ошибка файлов.
 """
+
 import argparse
 import json
 import os
@@ -315,9 +316,7 @@ def run_scrape(
     per_page: int,
     max_pages: int | None,
     initial: Sequence[Studio] = (),
-    fetch: Callable[
-        [StashDBClient, int, int], tuple[list[Studio], int]
-    ] = fetch_studios_page,
+    fetch: Callable[[StashDBClient, int, int], tuple[list[Studio], int]] = fetch_studios_page,
     on_page: Callable[[int, list[Studio], int], None] | None = None,
     allow_empty_tail: bool = False,
 ) -> ScrapeReport:
@@ -357,8 +356,7 @@ def run_scrape(
                 complete = True
                 break
             raise ScraperGapError(
-                f"page {page} is empty, but only {len(studios)} of "
-                f"{count} studios were collected"
+                f"page {page} is empty, but only {len(studios)} of {count} studios were collected"
             )
 
         for studio in page_studios:
@@ -410,37 +408,54 @@ def _build_parser(
     """Аргументы скрапера для выбранного источника."""
     parser = argparse.ArgumentParser(
         prog=source.script,
-        description=(
-            f"Scrape {source.name} studios into {source.default_out} "
-            "with resume."
-        ),
+        description=(f"Scrape {source.name} studios into {source.default_out} with resume."),
     )
-    parser.add_argument("--out", default=source.default_out,
-                        help=f"studios JSON to merge into "
-                             f"(default: {source.default_out})")
-    parser.add_argument("--checkpoint", default=source.default_checkpoint,
-                        help=f"checkpoint JSON "
-                             f"(default: {source.default_checkpoint})")
-    parser.add_argument("--raw", default=source.default_raw,
-                        help=f"raw scraped studios (default: {source.default_raw})")
-    parser.add_argument("--per-page", type=_positive_int,
-                        default=DEFAULT_PER_PAGE,
-                        help="studios per page (default: 100)")
-    parser.add_argument("--delay", type=_non_negative_float,
-                        default=DEFAULT_DELAY,
-                        help="seconds before each request (default: 1.0)")
-    parser.add_argument("--max-pages", type=_positive_int, default=None,
-                        help="stop after N pages (incomplete checkpoint)")
-    parser.add_argument("--apply", action="store_true",
-                        help="write progress, studios.json and collision report")
-    parser.add_argument("--reset", action="store_true",
-                        help="ignore and (with --apply) delete checkpoint/raw")
-    parser.add_argument("--no-filter", action="store_true",
-                        help="keep generated/placeholder studio names too")
     parser.add_argument(
-        "--allow-empty-tail", action="store_true",
-        help="accept an empty last page when the reported count is a few "
-             "records too high",
+        "--out",
+        default=source.default_out,
+        help=f"studios JSON to merge into (default: {source.default_out})",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        default=source.default_checkpoint,
+        help=f"checkpoint JSON (default: {source.default_checkpoint})",
+    )
+    parser.add_argument(
+        "--raw",
+        default=source.default_raw,
+        help=f"raw scraped studios (default: {source.default_raw})",
+    )
+    parser.add_argument(
+        "--per-page",
+        type=_positive_int,
+        default=DEFAULT_PER_PAGE,
+        help="studios per page (default: 100)",
+    )
+    parser.add_argument(
+        "--delay",
+        type=_non_negative_float,
+        default=DEFAULT_DELAY,
+        help="seconds before each request (default: 1.0)",
+    )
+    parser.add_argument(
+        "--max-pages",
+        type=_positive_int,
+        default=None,
+        help="stop after N pages (incomplete checkpoint)",
+    )
+    parser.add_argument(
+        "--apply", action="store_true", help="write progress, studios.json and collision report"
+    )
+    parser.add_argument(
+        "--reset", action="store_true", help="ignore and (with --apply) delete checkpoint/raw"
+    )
+    parser.add_argument(
+        "--no-filter", action="store_true", help="keep generated/placeholder studio names too"
+    )
+    parser.add_argument(
+        "--allow-empty-tail",
+        action="store_true",
+        help="accept an empty last page when the reported count is a few records too high",
     )
     return parser
 
@@ -491,8 +506,7 @@ def main(
     api_key = os.environ.get(source.api_key_env, "").strip()
     if not api_key:
         print(
-            f"error: {source.api_key_env} is not set "
-            "(checked environment and .env)",
+            f"error: {source.api_key_env} is not set (checked environment and .env)",
             file=sys.stderr,
         )
         return 2
@@ -501,8 +515,7 @@ def main(
         checkpoint = None if args.reset else load_checkpoint(args.checkpoint)
     except (OSError, ValueError) as exc:
         print(
-            f"error: cannot read checkpoint {args.checkpoint}: {exc}; "
-            f"use --reset to start over",
+            f"error: cannot read checkpoint {args.checkpoint}: {exc}; use --reset to start over",
             file=sys.stderr,
         )
         return 2
@@ -533,8 +546,7 @@ def main(
             initial = load_raw(args.raw)
         except (OSError, ValueError) as exc:
             print(
-                f"error: cannot read raw studios {args.raw}: {exc}; "
-                f"use --reset to start over",
+                f"error: cannot read raw studios {args.raw}: {exc}; use --reset to start over",
                 file=sys.stderr,
             )
             return 2
@@ -543,10 +555,7 @@ def main(
         checkpoint is not None
         and not args.reset
         and not initial
-        and (
-            checkpoint.count > 0
-            or (not checkpoint.complete and checkpoint.page >= 1)
-        )
+        and (checkpoint.count > 0 or (not checkpoint.complete and checkpoint.page >= 1))
     ):
         print(
             f"error: checkpoint {args.checkpoint} expects "
@@ -560,9 +569,7 @@ def main(
     if checkpoint is not None and checkpoint.complete and not args.reset:
         studios = tuple(_unique_studios(initial))
         report = ScrapeReport(studios, checkpoint.page + 1, True, 0)
-        print(
-            f"checkpoint is complete; using {len(studios)} saved studio(s)"
-        )
+        print(f"checkpoint is complete; using {len(studios)} saved studio(s)")
     else:
         start_page = 1 if (args.reset or checkpoint is None) else checkpoint.page + 1
         accumulated = _unique_studios(initial)
@@ -589,13 +596,10 @@ def main(
                     ),
                 )
             print(
-                f"page {page}: {len(page_studios)} studio(s), "
-                f"{len(accumulated)}/{count} collected"
+                f"page {page}: {len(page_studios)} studio(s), {len(accumulated)}/{count} collected"
             )
 
-        client = StashDBClient(
-            api_key, endpoint=source.endpoint, delay=args.delay
-        )
+        client = StashDBClient(api_key, endpoint=source.endpoint, delay=args.delay)
         try:
             report = run_scrape(
                 client,
@@ -608,8 +612,7 @@ def main(
             )
         except StashDBAuthError as exc:
             print(
-                f"error: {source.name} rejected the request: {exc}; "
-                f"проверь {source.api_key_env}",
+                f"error: {source.name} rejected the request: {exc}; проверь {source.api_key_env}",
                 file=sys.stderr,
             )
             return 2
@@ -623,8 +626,7 @@ def main(
             print(f"error: {exc}", file=sys.stderr)
             return 2
         except OSError as exc:
-            print(f"error: cannot save scrape progress: {exc}",
-                  file=sys.stderr)
+            print(f"error: cannot save scrape progress: {exc}", file=sys.stderr)
             return 2
 
     all_names = [studio.name for studio in report.studios]

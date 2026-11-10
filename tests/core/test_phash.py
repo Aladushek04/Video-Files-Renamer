@@ -33,8 +33,7 @@ def make_bmp_24(width, height, pixels):
         row += b"\x00" * (row_size - len(row))
         body += row
     header = struct.pack("<2sIHHI", b"BM", 54 + len(body), 0, 0, 54)
-    header += struct.pack("<IiiHHIIiiII", 40, width, height, 1, 24, 0,
-                          len(body), 0, 0, 0, 0)
+    header += struct.pack("<IiiHHIIiiII", 40, width, height, 1, 24, 0, len(body), 0, 0, 0, 0)
     return header + bytes(body)
 
 
@@ -172,8 +171,9 @@ def _ffmpeg_binary(name):
     explicit = os.environ.get(f"{name.upper()}_PATH")
     if explicit and os.path.exists(explicit):
         return explicit
-    winget = os.path.join(os.environ.get("LOCALAPPDATA", ""),
-                          "Microsoft", "WinGet", "Links", f"{name}.exe")
+    winget = os.path.join(
+        os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Links", f"{name}.exe"
+    )
     return winget if os.path.exists(winget) else None
 
 

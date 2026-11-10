@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Скрапер студий FansDB (stash-box) с чекпоинтом и безопасным merge."""
+
 import sys
 
 from video_renamer.scrapers.stashdb import FANSDB_SOURCE, main

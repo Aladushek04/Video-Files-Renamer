@@ -20,14 +20,22 @@ from video_renamer.core.stashdb_client import (
 
 
 def test_scene_from_node_reads_all_fields():
-    scene = scene_from_node({
-        "id": "s1", "title": "Poking Glory", "release_date": "2026-10-03",
-        "date": "2026-10-03", "code": "GP1", "duration": 1200,
-        "studio": {"id": "st1", "name": "BrazzersExxtra",
-                    "parent": {"id": "st0", "name": "Brazzers"}},
-        "performers": [{"as": "Ryan Reid",
-                        "performer": {"id": "p1", "name": "Ryan Reid"}}],
-    })
+    scene = scene_from_node(
+        {
+            "id": "s1",
+            "title": "Poking Glory",
+            "release_date": "2026-10-03",
+            "date": "2026-10-03",
+            "code": "GP1",
+            "duration": 1200,
+            "studio": {
+                "id": "st1",
+                "name": "BrazzersExxtra",
+                "parent": {"id": "st0", "name": "Brazzers"},
+            },
+            "performers": [{"as": "Ryan Reid", "performer": {"id": "p1", "name": "Ryan Reid"}}],
+        }
+    )
     assert scene.studio.name == "BrazzersExxtra"
     assert scene.studio.parent_name == "Brazzers"
     assert scene.performers[0].display_name == "Ryan Reid"
@@ -35,14 +43,20 @@ def test_scene_from_node_reads_all_fields():
 
 
 def test_scene_defaults_to_stashdb_source():
-    scene = Scene(id="s1", title=None, release_date=None, date=None,
-                  code=None, duration=None)
+    scene = Scene(id="s1", title=None, release_date=None, date=None, code=None, duration=None)
     assert scene.source == "StashDB"
 
 
 def test_scene_source_round_trips_through_dict():
-    scene = Scene(id="s1", title="T", release_date=None, date=None,
-                  code=None, duration=None, source="ThePornDB")
+    scene = Scene(
+        id="s1",
+        title="T",
+        release_date=None,
+        date=None,
+        code=None,
+        duration=None,
+        source="ThePornDB",
+    )
     assert Scene.from_dict(scene.to_dict()).source == "ThePornDB"
 
 
@@ -51,21 +65,35 @@ def test_scene_from_dict_without_source_defaults_to_stashdb():
 
 
 def test_scene_from_node_allows_null_studio_and_alias():
-    scene = scene_from_node({
-        "id": "s2", "title": None, "release_date": None, "date": None,
-        "code": None, "duration": None, "studio": None,
-        "performers": [{"as": "Alias", "performer": {"id": "p2", "name": "Real"}}],
-    })
+    scene = scene_from_node(
+        {
+            "id": "s2",
+            "title": None,
+            "release_date": None,
+            "date": None,
+            "code": None,
+            "duration": None,
+            "studio": None,
+            "performers": [{"as": "Alias", "performer": {"id": "p2", "name": "Real"}}],
+        }
+    )
     assert scene.studio is None
     assert scene.performers[0].display_name == "Alias"
 
 
 def test_scene_from_node_reads_flat_fields():
-    scene = scene_from_node({
-        "id": "s3", "title": "Title", "release_date": "2026-10-03",
-        "date": "2020-01-01", "code": "ABC-123", "duration": 1800,
-        "studio": None, "performers": [],
-    })
+    scene = scene_from_node(
+        {
+            "id": "s3",
+            "title": "Title",
+            "release_date": "2026-10-03",
+            "date": "2020-01-01",
+            "code": "ABC-123",
+            "duration": 1800,
+            "studio": None,
+            "performers": [],
+        }
+    )
     assert scene.id == "s3"
     assert scene.title == "Title"
     assert scene.release_date == "2026-10-03"
@@ -89,10 +117,13 @@ def test_scene_from_node_keeps_missing_keys_as_none():
 
 
 def test_studio_from_node_reads_parent():
-    studio = studio_from_node({
-        "id": "st1", "name": "BrazzersExxtra",
-        "parent": {"id": "st0", "name": "Brazzers"},
-    })
+    studio = studio_from_node(
+        {
+            "id": "st1",
+            "name": "BrazzersExxtra",
+            "parent": {"id": "st0", "name": "Brazzers"},
+        }
+    )
     assert studio == Studio("st1", "BrazzersExxtra", "st0", "Brazzers")
 
 
@@ -103,25 +134,25 @@ def test_studio_from_node_without_parent():
 
 
 def test_studio_from_node_tolerates_malformed_node_and_parent():
-    assert studio_from_node({"id": "st1", "name": "A", "parent": "bad"}) == (
-        Studio("st1", "A")
-    )
-    assert studio_from_node({"id": "st2", "name": "B", "parent": 7}) == (
-        Studio("st2", "B")
-    )
+    assert studio_from_node({"id": "st1", "name": "A", "parent": "bad"}) == (Studio("st1", "A"))
+    assert studio_from_node({"id": "st2", "name": "B", "parent": 7}) == (Studio("st2", "B"))
     assert studio_from_node("bad") == Studio("", "")
 
 
 def test_scene_from_node_skips_malformed_nested_nodes():
-    scene = scene_from_node({
-        "id": "s-bad", "title": "Still useful", "studio": "not-a-dict",
-        "performers": [
-            "not-a-dict",
-            {"as": "Bad", "performer": "not-a-dict"},
-            {"as": "Good", "performer": {"id": "p1", "name": "Good"}},
-            None,
-        ],
-    })
+    scene = scene_from_node(
+        {
+            "id": "s-bad",
+            "title": "Still useful",
+            "studio": "not-a-dict",
+            "performers": [
+                "not-a-dict",
+                {"as": "Bad", "performer": "not-a-dict"},
+                {"as": "Good", "performer": {"id": "p1", "name": "Good"}},
+                None,
+            ],
+        }
+    )
     assert scene.id == "s-bad"
     assert scene.title == "Still useful"
     assert scene.studio is None
@@ -130,13 +161,26 @@ def test_scene_from_node_skips_malformed_nested_nodes():
 
 
 def test_search_scenes_tolerates_malformed_nested_nodes():
-    transport = transport_returning({"data": {"searchScene": [
-        {"id": "s1", "title": "T", "studio": "broken",
-         "performers": ["broken", {"as": "A", "performer": "broken"}]},
-        {"id": "s2", "title": "U",
-         "studio": {"id": "st1", "name": "A", "parent": "broken"},
-         "performers": [{"as": "B", "performer": {"id": "p2", "name": "B"}}]},
-    ]}})
+    transport = transport_returning(
+        {
+            "data": {
+                "searchScene": [
+                    {
+                        "id": "s1",
+                        "title": "T",
+                        "studio": "broken",
+                        "performers": ["broken", {"as": "A", "performer": "broken"}],
+                    },
+                    {
+                        "id": "s2",
+                        "title": "U",
+                        "studio": {"id": "st1", "name": "A", "parent": "broken"},
+                        "performers": [{"as": "B", "performer": {"id": "p2", "name": "B"}}],
+                    },
+                ]
+            }
+        }
+    )
     client = StashDBClient("k", delay=0, transport=transport)
 
     scenes = client.search_scenes("term")
@@ -154,35 +198,49 @@ def test_performer_display_name_prefers_alias():
 
 
 def test_empty_alias_falls_back_to_performer_name():
-    scene = scene_from_node({
-        "id": "s5", "studio": None,
-        "performers": [{"as": "", "performer": {"id": "p3", "name": "Real"}}],
-    })
+    scene = scene_from_node(
+        {
+            "id": "s5",
+            "studio": None,
+            "performers": [{"as": "", "performer": {"id": "p3", "name": "Real"}}],
+        }
+    )
     assert scene.performers[0].alias is None
     assert scene.performers[0].display_name == "Real"
 
 
 def test_scene_keeps_performer_order():
-    scene = scene_from_node({
-        "id": "s6", "studio": None,
-        "performers": [
-            {"as": "A", "performer": {"id": "p1", "name": "A"}},
-            {"as": "B", "performer": {"id": "p2", "name": "B"}},
-            {"as": "C", "performer": {"id": "p3", "name": "C"}},
-        ],
-    })
+    scene = scene_from_node(
+        {
+            "id": "s6",
+            "studio": None,
+            "performers": [
+                {"as": "A", "performer": {"id": "p1", "name": "A"}},
+                {"as": "B", "performer": {"id": "p2", "name": "B"}},
+                {"as": "C", "performer": {"id": "p3", "name": "C"}},
+            ],
+        }
+    )
     assert [p.display_name for p in scene.performers] == ["A", "B", "C"]
 
 
 def test_scene_to_dict_is_json_serializable():
-    scene = scene_from_node({
-        "id": "s1", "title": "Poking Glory", "release_date": "2026-10-03",
-        "date": "2026-10-03", "code": "GP1", "duration": 1200,
-        "studio": {"id": "st1", "name": "BrazzersExxtra",
-                    "parent": {"id": "st0", "name": "Brazzers"}},
-        "performers": [{"as": "Ryan Reid",
-                        "performer": {"id": "p1", "name": "Ryan Reid"}}],
-    })
+    scene = scene_from_node(
+        {
+            "id": "s1",
+            "title": "Poking Glory",
+            "release_date": "2026-10-03",
+            "date": "2026-10-03",
+            "code": "GP1",
+            "duration": 1200,
+            "studio": {
+                "id": "st1",
+                "name": "BrazzersExxtra",
+                "parent": {"id": "st0", "name": "Brazzers"},
+            },
+            "performers": [{"as": "Ryan Reid", "performer": {"id": "p1", "name": "Ryan Reid"}}],
+        }
+    )
     raw = json.dumps(scene.to_dict())
     assert Scene.from_dict(json.loads(raw)) == scene
 
@@ -212,10 +270,20 @@ def scene_node(hashes):
     data = []
     for group in hashes:
         h = group[0]["hash"]
-        data.append([
-            {"id": f"s-{h}", "title": h, "release_date": None, "date": None,
-             "code": None, "duration": None, "studio": None, "performers": []},
-        ])
+        data.append(
+            [
+                {
+                    "id": f"s-{h}",
+                    "title": h,
+                    "release_date": None,
+                    "date": None,
+                    "code": None,
+                    "duration": None,
+                    "studio": None,
+                    "performers": [],
+                },
+            ]
+        )
     return data
 
 
@@ -226,9 +294,7 @@ def test_find_scenes_by_hashes_sends_phash_algorithm():
         body = json.loads(req.data)
         calls.append(body)
         groups = body["variables"]["fingerprints"]
-        return json.dumps(
-            {"data": {"findScenesBySceneFingerprints": scene_node(groups)}}
-        ).encode()
+        return json.dumps({"data": {"findScenesBySceneFingerprints": scene_node(groups)}}).encode()
 
     client = StashDBClient("k", delay=0, transport=_transport)
     client.find_scenes_by_hashes(["dc75c0f03795438e"], algorithm="PHASH")
@@ -254,9 +320,7 @@ def test_batches_40_and_keeps_order():
     assert result[0][0].id == "s-h00"
     assert len(calls) == 2
     assert len(calls[0]["variables"]["fingerprints"]) == 40
-    assert calls[0]["variables"]["fingerprints"][0] == [
-        {"hash": "h00", "algorithm": "OSHASH"}
-    ]
+    assert calls[0]["variables"]["fingerprints"][0] == [{"hash": "h00", "algorithm": "OSHASH"}]
     assert [g[0]["hash"] for g in calls[1]["variables"]["fingerprints"]] == ["h40"]
 
 
@@ -267,9 +331,7 @@ def test_find_scenes_deduplicates_hashes_and_aligns_with_input():
         body = json.loads(req.data)
         calls.append(body)
         groups = body["variables"]["fingerprints"]
-        return json.dumps(
-            {"data": {"findScenesBySceneFingerprints": scene_node(groups)}}
-        ).encode()
+        return json.dumps({"data": {"findScenesBySceneFingerprints": scene_node(groups)}}).encode()
 
     client = StashDBClient("k", delay=0, transport=_transport)
     result = client.find_scenes_by_hashes(["a", "b", "a"])
@@ -291,9 +353,15 @@ def test_find_scenes_with_no_hashes_makes_no_request():
 
 def test_find_scenes_pads_missing_groups_with_empty_lists():
     def _transport(req, timeout):
-        return json.dumps({"data": {"findScenesBySceneFingerprints": [
-            [{"id": "s-a", "title": "A", "studio": None, "performers": []}]
-        ]}}).encode()
+        return json.dumps(
+            {
+                "data": {
+                    "findScenesBySceneFingerprints": [
+                        [{"id": "s-a", "title": "A", "studio": None, "performers": []}]
+                    ]
+                }
+            }
+        ).encode()
 
     client = StashDBClient("k", delay=0, transport=_transport)
     result = client.find_scenes_by_hashes(["a", "b"])
@@ -301,12 +369,23 @@ def test_find_scenes_pads_missing_groups_with_empty_lists():
 
 
 def test_search_scenes_returns_parsed_models():
-    transport = transport_returning({"data": {"searchScene": [
-        {"id": "s1", "title": "T", "release_date": "2026-10-03",
-         "code": "C1", "duration": 60,
-         "studio": {"id": "st1", "name": "A", "parent": None},
-         "performers": [{"as": "Alias", "performer": {"id": "p1", "name": "Real"}}]},
-    ]}})
+    transport = transport_returning(
+        {
+            "data": {
+                "searchScene": [
+                    {
+                        "id": "s1",
+                        "title": "T",
+                        "release_date": "2026-10-03",
+                        "code": "C1",
+                        "duration": 60,
+                        "studio": {"id": "st1", "name": "A", "parent": None},
+                        "performers": [{"as": "Alias", "performer": {"id": "p1", "name": "Real"}}],
+                    },
+                ]
+            }
+        }
+    )
     client = StashDBClient("k", delay=0, transport=transport)
     scenes = client.search_scenes("term")
     assert scenes[0].studio == Studio("st1", "A")
@@ -340,9 +419,7 @@ def test_auth_error_is_fatal():
 
     def _transport(req, timeout):
         attempts.append(1)
-        raise urllib.error.HTTPError(
-            req.full_url, 401, "Unauthorized", {}, io.BytesIO(b"")
-        )
+        raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, io.BytesIO(b""))
 
     client = StashDBClient("bad", delay=0, transport=_transport)
     with pytest.raises(StashDBAuthError):
@@ -352,9 +429,7 @@ def test_auth_error_is_fatal():
 
 def test_403_is_auth_error():
     def _transport(req, timeout):
-        raise urllib.error.HTTPError(
-            req.full_url, 403, "Forbidden", {}, io.BytesIO(b"")
-        )
+        raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, io.BytesIO(b""))
 
     client = StashDBClient("bad", delay=0, transport=_transport)
     with pytest.raises(StashDBAuthError):
@@ -393,8 +468,7 @@ def test_429_retries_then_rate_limit():
             req.full_url, 429, "Too Many", {"Retry-After": "0"}, io.BytesIO(b"")
         )
 
-    client = StashDBClient("k", delay=0, max_attempts=2,
-                           sleep=lambda s: None, transport=_transport)
+    client = StashDBClient("k", delay=0, max_attempts=2, sleep=lambda s: None, transport=_transport)
     with pytest.raises(StashDBRateLimitError):
         client.search_scenes("test")
     assert len(attempts) == 2
@@ -408,8 +482,7 @@ def test_429_honours_retry_after_and_caps_it():
             req.full_url, 429, "Too Many", {"Retry-After": "9999"}, io.BytesIO(b"")
         )
 
-    client = StashDBClient("k", delay=0, max_attempts=2,
-                           sleep=sleeps.append, transport=_transport)
+    client = StashDBClient("k", delay=0, max_attempts=2, sleep=sleeps.append, transport=_transport)
     with pytest.raises(StashDBTransientError):
         client.search_scenes("test")
     assert sleeps == [300]
@@ -421,12 +494,9 @@ def test_5xx_retries_with_backoff_then_transient():
 
     def _transport(req, timeout):
         attempts.append(1)
-        raise urllib.error.HTTPError(
-            req.full_url, 503, "Unavailable", {}, io.BytesIO(b"")
-        )
+        raise urllib.error.HTTPError(req.full_url, 503, "Unavailable", {}, io.BytesIO(b""))
 
-    client = StashDBClient("k", delay=0, max_attempts=3,
-                           sleep=sleeps.append, transport=_transport)
+    client = StashDBClient("k", delay=0, max_attempts=3, sleep=sleeps.append, transport=_transport)
     with pytest.raises(StashDBTransientError):
         client.search_scenes("test")
     assert len(attempts) == 3
@@ -441,8 +511,7 @@ def test_url_error_retries_then_transient():
         attempts.append(1)
         raise urllib.error.URLError("boom")
 
-    client = StashDBClient("k", delay=0, max_attempts=2,
-                           sleep=sleeps.append, transport=_transport)
+    client = StashDBClient("k", delay=0, max_attempts=2, sleep=sleeps.append, transport=_transport)
     with pytest.raises(StashDBTransientError):
         client.search_scenes("test")
     assert len(attempts) == 2
@@ -455,8 +524,7 @@ def test_delay_is_applied_before_request():
     def _transport(req, timeout):
         return json.dumps({"data": {"searchScene": []}}).encode()
 
-    client = StashDBClient("k", delay=0.25, sleep=sleeps.append,
-                           transport=_transport)
+    client = StashDBClient("k", delay=0.25, sleep=sleeps.append, transport=_transport)
     client.search_scenes("term")
     assert sleeps == [0.25]
 
@@ -474,8 +542,9 @@ def test_execute_returns_data():
 
 
 def test_query_studios_parses_count():
-    transport = transport_returning({"data": {"queryStudios": {
-        "count": 2, "studios": [{"id": "1", "name": "A"}]}}})
+    transport = transport_returning(
+        {"data": {"queryStudios": {"count": 2, "studios": [{"id": "1", "name": "A"}]}}}
+    )
     client = StashDBClient("k", delay=0, transport=transport)
     studios, count = client.query_studios(1, 100)
     assert count == 2 and studios[0].name == "A"
@@ -486,8 +555,7 @@ def test_query_studios_sends_page_and_per_page():
 
     def _transport(req, timeout):
         calls.append(json.loads(req.data))
-        return json.dumps({"data": {"queryStudios": {
-            "count": 0, "studios": []}}}).encode()
+        return json.dumps({"data": {"queryStudios": {"count": 0, "studios": []}}}).encode()
 
     client = StashDBClient("k", delay=0, transport=_transport)
     assert client.query_studios(3, per_page=50) == ([], 0)

@@ -1,4 +1,5 @@
 """Тесты CLI `fix_video_titles.py`: CSV-ревью и режимы preview/apply."""
+
 import csv
 from pathlib import Path
 
@@ -19,9 +20,18 @@ from video_renamer.core.title_service import ApplyResult, PreviewReport, Preview
 
 def test_phash_missing_tool_fails_fast(tmp_path, capsys):
     csv_path = tmp_path / "preview.csv"
-    code = main(["preview", str(tmp_path), "--offline", "--phash",
-                 "--ffmpeg", r"C:\nope\ffmpeg.exe",
-                 "--csv", str(csv_path)])
+    code = main(
+        [
+            "preview",
+            str(tmp_path),
+            "--offline",
+            "--phash",
+            "--ffmpeg",
+            r"C:\nope\ffmpeg.exe",
+            "--csv",
+            str(csv_path),
+        ]
+    )
     assert code == 2
     assert "ffmpeg" in capsys.readouterr().err
     assert not csv_path.exists()
@@ -33,9 +43,7 @@ def _row(tmp_path, approved=True, old="old.mp4", new="new.mp4", create=True):
     if create and not path.exists():
         path.write_bytes(b"abcdefghij")
     if not create:
-        return PreviewRow(
-            approved, old, new, "fingerprint", 1.0, "scene-1", "", "h", 10
-        )
+        return PreviewRow(approved, old, new, "fingerprint", 1.0, "scene-1", "", "h", 10)
     return PreviewRow(
         approved,
         old,
@@ -51,8 +59,7 @@ def _row(tmp_path, approved=True, old="old.mp4", new="new.mp4", create=True):
 
 def test_csv_roundtrip_and_formula_guard(tmp_path):
     p = tmp_path / "preview.csv"
-    row = PreviewRow(True, "old.mp4", "=New.mp4", "fingerprint", 1.0,
-                     "s1", "note", "h", 3)
+    row = PreviewRow(True, "old.mp4", "=New.mp4", "fingerprint", 1.0, "s1", "note", "h", 3)
     write_preview_csv(str(p), [row])
     raw = p.read_text(encoding="utf-8-sig")
     assert "'=New.mp4" in raw
@@ -61,8 +68,7 @@ def test_csv_roundtrip_and_formula_guard(tmp_path):
 
 def test_csv_formula_guard_covers_old_and_roundtrips_all_fields(tmp_path):
     p = tmp_path / "preview.csv"
-    row = PreviewRow(False, "-old.mp4", "@new.mp4", "text", 0.5,
-                     "s2", "a;b", "abc", 42)
+    row = PreviewRow(False, "-old.mp4", "@new.mp4", "text", 0.5, "s2", "a;b", "abc", 42)
     write_preview_csv(str(p), [row])
     raw = p.read_text(encoding="utf-8-sig")
     assert "'-old.mp4" in raw
@@ -72,8 +78,7 @@ def test_csv_formula_guard_covers_old_and_roundtrips_all_fields(tmp_path):
 
 def test_csv_preserves_leading_apostrophe_before_formula_prefix(tmp_path):
     p = tmp_path / "preview.csv"
-    row = PreviewRow(False, "'-old.mp4", "''-new.mp4", "text", 0.5,
-                     "s3", "", "h", 3)
+    row = PreviewRow(False, "'-old.mp4", "''-new.mp4", "text", 0.5, "s3", "", "h", 3)
     write_preview_csv(str(p), [row])
     assert read_preview_csv(str(p)) == [row]
 
@@ -81,8 +86,7 @@ def test_csv_preserves_leading_apostrophe_before_formula_prefix(tmp_path):
 def test_csv_guards_note_formula_and_roundtrips(tmp_path):
     p = tmp_path / "preview.csv"
     note = "=SUM(1;2)"
-    row = PreviewRow(False, "a.mp4", "b.mp4", "text", 0.5, "s4", note,
-                     "h", 3)
+    row = PreviewRow(False, "a.mp4", "b.mp4", "text", 0.5, "s4", note, "h", 3)
     write_preview_csv(str(p), [row])
     raw = p.read_text(encoding="utf-8-sig")
     assert "'=SUM(1;2)" in raw
@@ -113,9 +117,17 @@ def test_csv_read_rejects_missing_columns(tmp_path):
 def test_preview_cli_writes_csv_and_does_not_rename(tmp_path, monkeypatch):
     (tmp_path / "old.mp4").write_bytes(b"abcdefghij")
     monkeypatch.setenv("STASHDB_API_KEY", "")
-    code = main(["preview", str(tmp_path), "--offline",
-                 "--csv", str(tmp_path / "p.csv"),
-                 "--cache", str(tmp_path / "c.sqlite3")])
+    code = main(
+        [
+            "preview",
+            str(tmp_path),
+            "--offline",
+            "--csv",
+            str(tmp_path / "p.csv"),
+            "--cache",
+            str(tmp_path / "c.sqlite3"),
+        ]
+    )
     assert code == 0
     assert (tmp_path / "old.mp4").exists()
     assert (tmp_path / "p.csv").exists()
@@ -141,22 +153,27 @@ def test_preview_defaults_are_independent_of_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("STASHDB_API_KEY", "")
     monkeypatch.setattr(
-        fix_video_titles, "_load_studios",
+        fix_video_titles,
+        "_load_studios",
         lambda path: seen.setdefault("studios", path) or {},
     )
     monkeypatch.setattr(fix_video_titles, "TitleCache", FakeCache)
     monkeypatch.setattr(fix_video_titles, "TitleService", FakeService)
-    code = main(["preview", str(tmp_path), "--offline",
-                 "--csv", str(tmp_path / "p.csv")])
+    code = main(["preview", str(tmp_path), "--offline", "--csv", str(tmp_path / "p.csv")])
     assert code == 0
     assert Path(seen["studios"]).is_absolute()
     assert Path(seen["cache"]).is_absolute()
 
 
 def test_apply_default_log_is_project_anchored(tmp_path):
-    args = fix_video_titles._build_parser().parse_args([
-        "apply", "preview.csv", "--root", str(tmp_path),
-    ])
+    args = fix_video_titles._build_parser().parse_args(
+        [
+            "apply",
+            "preview.csv",
+            "--root",
+            str(tmp_path),
+        ]
+    )
     assert Path(args.log).is_absolute()
     assert Path(args.log).name == "rename_log.csv"
 
@@ -177,13 +194,20 @@ def test_preview_reads_api_key_from_dotenv(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("STASHDB_API_KEY", raising=False)
-    (tmp_path / ".env").write_text("STASHDB_API_KEY=from-dotenv\n",
-                                   encoding="utf-8")
+    (tmp_path / ".env").write_text("STASHDB_API_KEY=from-dotenv\n", encoding="utf-8")
     monkeypatch.setattr(fix_video_titles, "StashDBClient", FakeClient)
     monkeypatch.setattr(fix_video_titles, "TitleService", FakeService)
-    code = main(["preview", str(tmp_path), "--no-text",
-                 "--csv", str(tmp_path / "p.csv"),
-                 "--cache", str(tmp_path / "c.sqlite3")])
+    code = main(
+        [
+            "preview",
+            str(tmp_path),
+            "--no-text",
+            "--csv",
+            str(tmp_path / "p.csv"),
+            "--cache",
+            str(tmp_path / "c.sqlite3"),
+        ]
+    )
     assert code == 0
     assert seen["api_key"] == "from-dotenv"
     assert seen["client"] is not None
@@ -202,9 +226,16 @@ def test_preview_missing_key_warns_and_goes_offline(tmp_path, monkeypatch, capsy
 
     monkeypatch.setenv("STASHDB_API_KEY", "")
     monkeypatch.setattr(fix_video_titles, "TitleService", FakeService)
-    code = main(["preview", str(tmp_path),
-                 "--csv", str(tmp_path / "p.csv"),
-                 "--cache", str(tmp_path / "c.sqlite3")])
+    code = main(
+        [
+            "preview",
+            str(tmp_path),
+            "--csv",
+            str(tmp_path / "p.csv"),
+            "--cache",
+            str(tmp_path / "c.sqlite3"),
+        ]
+    )
     assert code == 0
     assert captured["offline"] is True
     assert captured["client"] is None
@@ -227,9 +258,16 @@ def test_preview_warns_about_missing_secondary_key(tmp_path, monkeypatch, capsys
     monkeypatch.setenv("THE_PORNDB_API_KEY", "")
     monkeypatch.setenv("FANSDB_API_KEY", "fans")
     monkeypatch.setattr(fix_video_titles, "TitleService", _fake_service_capturing_nothing())
-    code = main(["preview", str(tmp_path),
-                 "--csv", str(tmp_path / "p.csv"),
-                 "--cache", str(tmp_path / "c.sqlite3")])
+    code = main(
+        [
+            "preview",
+            str(tmp_path),
+            "--csv",
+            str(tmp_path / "p.csv"),
+            "--cache",
+            str(tmp_path / "c.sqlite3"),
+        ]
+    )
     err = capsys.readouterr().err
     assert code == 0
     assert "THE_PORNDB_API_KEY" in err
@@ -241,9 +279,17 @@ def test_no_secondary_suppresses_missing_key_warning(tmp_path, monkeypatch, caps
     monkeypatch.setenv("THE_PORNDB_API_KEY", "")
     monkeypatch.setenv("FANSDB_API_KEY", "")
     monkeypatch.setattr(fix_video_titles, "TitleService", _fake_service_capturing_nothing())
-    main(["preview", str(tmp_path), "--no-secondary",
-          "--csv", str(tmp_path / "p.csv"),
-          "--cache", str(tmp_path / "c.sqlite3")])
+    main(
+        [
+            "preview",
+            str(tmp_path),
+            "--no-secondary",
+            "--csv",
+            str(tmp_path / "p.csv"),
+            "--cache",
+            str(tmp_path / "c.sqlite3"),
+        ]
+    )
     assert "THE_PORNDB_API_KEY" not in capsys.readouterr().err
 
 
@@ -257,9 +303,16 @@ def test_preview_auth_error_exits_2_without_csv(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setenv("STASHDB_API_KEY", "bad")
     monkeypatch.setattr(fix_video_titles, "TitleService", FakeService)
-    code = main(["preview", str(tmp_path),
-                 "--csv", str(tmp_path / "p.csv"),
-                 "--cache", str(tmp_path / "c.sqlite3")])
+    code = main(
+        [
+            "preview",
+            str(tmp_path),
+            "--csv",
+            str(tmp_path / "p.csv"),
+            "--cache",
+            str(tmp_path / "c.sqlite3"),
+        ]
+    )
     assert code == 2
     assert not (tmp_path / "p.csv").exists()
     assert "STASHDB_API_KEY" in capsys.readouterr().err
@@ -275,9 +328,16 @@ def test_preview_query_error_exits_2_without_csv(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setenv("STASHDB_API_KEY", "key")
     monkeypatch.setattr(fix_video_titles, "TitleService", FakeService)
-    code = main(["preview", str(tmp_path),
-                 "--csv", str(tmp_path / "p.csv"),
-                 "--cache", str(tmp_path / "c.sqlite3")])
+    code = main(
+        [
+            "preview",
+            str(tmp_path),
+            "--csv",
+            str(tmp_path / "p.csv"),
+            "--cache",
+            str(tmp_path / "c.sqlite3"),
+        ]
+    )
     assert code == 2
     assert not (tmp_path / "p.csv").exists()
     assert "bad query" in capsys.readouterr().err
@@ -290,15 +350,23 @@ def test_preview_transient_errors_write_csv_and_exit_1(tmp_path, monkeypatch):
 
         def preview(self):
             return PreviewReport(
-                rows=(), warnings=("StashDB text search failed",),
+                rows=(),
+                warnings=("StashDB text search failed",),
                 had_transient_errors=True,
             )
 
     monkeypatch.setenv("STASHDB_API_KEY", "key")
     monkeypatch.setattr(fix_video_titles, "TitleService", FakeService)
-    code = main(["preview", str(tmp_path),
-                 "--csv", str(tmp_path / "p.csv"),
-                 "--cache", str(tmp_path / "c.sqlite3")])
+    code = main(
+        [
+            "preview",
+            str(tmp_path),
+            "--csv",
+            str(tmp_path / "p.csv"),
+            "--cache",
+            str(tmp_path / "c.sqlite3"),
+        ]
+    )
     assert code == 1
     assert (tmp_path / "p.csv").exists()
 
@@ -315,8 +383,9 @@ def test_apply_dry_run_does_not_rename_or_log(tmp_path):
     csv_path = tmp_path / "preview.csv"
     write_preview_csv(str(csv_path), [row])
 
-    code = main(["apply", str(csv_path), "--root", str(tmp_path),
-                 "--log", str(tmp_path / "rename_log.csv")])
+    code = main(
+        ["apply", str(csv_path), "--root", str(tmp_path), "--log", str(tmp_path / "rename_log.csv")]
+    )
 
     assert code == 0
     assert (tmp_path / "old.mp4").exists()
@@ -333,8 +402,17 @@ def test_apply_log_write_error_exits_1(tmp_path, monkeypatch, capsys):
         raise OSError("disk full")
 
     monkeypatch.setattr(fix_video_titles, "append_rename_log", boom)
-    code = main(["apply", str(csv_path), "--root", str(tmp_path),
-                 "--log", str(tmp_path / "rename_log.csv"), "--apply"])
+    code = main(
+        [
+            "apply",
+            str(csv_path),
+            "--root",
+            str(tmp_path),
+            "--log",
+            str(tmp_path / "rename_log.csv"),
+            "--apply",
+        ]
+    )
 
     assert code == 1
     assert "disk full" in capsys.readouterr().err
@@ -346,8 +424,17 @@ def test_apply_renames_only_approved_and_logs_renames(tmp_path, capsys):
     csv_path = tmp_path / "preview.csv"
     write_preview_csv(str(csv_path), [approved, skipped])
 
-    code = main(["apply", str(csv_path), "--root", str(tmp_path),
-                 "--log", str(tmp_path / "rename_log.csv"), "--apply"])
+    code = main(
+        [
+            "apply",
+            str(csv_path),
+            "--root",
+            str(tmp_path),
+            "--log",
+            str(tmp_path / "rename_log.csv"),
+            "--apply",
+        ]
+    )
 
     assert code == 0
     assert (tmp_path / "new.mp4").exists()
@@ -372,9 +459,18 @@ def test_apply_suffix_collisions_logs_actual_target(tmp_path, capsys):
     csv_path = tmp_path / "preview.csv"
     write_preview_csv(str(csv_path), [row])
 
-    code = main(["apply", str(csv_path), "--root", str(tmp_path),
-                 "--log", str(tmp_path / "rename_log.csv"), "--apply",
-                 "--suffix-collisions"])
+    code = main(
+        [
+            "apply",
+            str(csv_path),
+            "--root",
+            str(tmp_path),
+            "--log",
+            str(tmp_path / "rename_log.csv"),
+            "--apply",
+            "--suffix-collisions",
+        ]
+    )
 
     assert code == 0
     assert (tmp_path / "new (2).mp4").exists()
@@ -382,21 +478,38 @@ def test_apply_suffix_collisions_logs_actual_target(tmp_path, capsys):
     log = (tmp_path / "rename_log.csv").read_text(encoding="utf-8-sig")
     fields = log.strip().splitlines()[1].split(";")
     assert fields[1:] == [
-        "rename", "", str(tmp_path), "old.mp4", "new (2).mp4",
-        row.oshash, str(row.size), "scene-1", "fingerprint",
+        "rename",
+        "",
+        str(tmp_path),
+        "old.mp4",
+        "new (2).mp4",
+        row.oshash,
+        str(row.size),
+        "scene-1",
+        "fingerprint",
     ]
 
 
 def _applied_log(tmp_path):
     """Реальный apply a.mp4 -> b.mp4 через CLI; возвращает путь журнала."""
     (tmp_path / "a.mp4").write_bytes(b"a" * 100)
-    row = PreviewRow(True, "a.mp4", "b.mp4", "fingerprint", 1.0, "scene-1", "",
-                     oshash_from_path(str(tmp_path / "a.mp4")), 100)
+    row = PreviewRow(
+        True,
+        "a.mp4",
+        "b.mp4",
+        "fingerprint",
+        1.0,
+        "scene-1",
+        "",
+        oshash_from_path(str(tmp_path / "a.mp4")),
+        100,
+    )
     csv_path = tmp_path / "preview.csv"
     write_preview_csv(str(csv_path), [row])
     log = tmp_path / "rename_log.csv"
-    assert main(["apply", str(csv_path), "--root", str(tmp_path),
-                 "--log", str(log), "--apply"]) == 0
+    assert (
+        main(["apply", str(csv_path), "--root", str(tmp_path), "--log", str(log), "--apply"]) == 0
+    )
     return log
 
 
@@ -450,13 +563,29 @@ def test_cli_undo_legacy_requires_confirm(tmp_path, capsys):
     entry_id = read_log(str(legacy))[0].id
     capsys.readouterr()
 
-    assert main(["undo", "--ids", entry_id, "--log", str(legacy),
-                 "--root", str(tmp_path), "--apply"]) == 1
+    assert (
+        main(["undo", "--ids", entry_id, "--log", str(legacy), "--root", str(tmp_path), "--apply"])
+        == 1
+    )
     assert (tmp_path / "b.mp4").exists()
     assert "--confirm-legacy" in capsys.readouterr().err
 
-    assert main(["undo", "--ids", entry_id, "--log", str(legacy),
-                 "--root", str(tmp_path), "--apply", "--confirm-legacy"]) == 0
+    assert (
+        main(
+            [
+                "undo",
+                "--ids",
+                entry_id,
+                "--log",
+                str(legacy),
+                "--root",
+                str(tmp_path),
+                "--apply",
+                "--confirm-legacy",
+            ]
+        )
+        == 0
+    )
     assert (tmp_path / "a.mp4").exists()
 
 
@@ -471,13 +600,21 @@ def test_cli_undo_requires_list_or_ids(tmp_path):
 
 
 def test_apply_row_error_exits_1(tmp_path, capsys):
-    row = _row(tmp_path, approved=True, old="missing.mp4", new="new.mp4",
-               create=False)
+    row = _row(tmp_path, approved=True, old="missing.mp4", new="new.mp4", create=False)
     csv_path = tmp_path / "preview.csv"
     write_preview_csv(str(csv_path), [row])
 
-    code = main(["apply", str(csv_path), "--root", str(tmp_path),
-                 "--log", str(tmp_path / "rename_log.csv"), "--apply"])
+    code = main(
+        [
+            "apply",
+            str(csv_path),
+            "--root",
+            str(tmp_path),
+            "--log",
+            str(tmp_path / "rename_log.csv"),
+            "--apply",
+        ]
+    )
 
     assert code == 1
     assert not (tmp_path / "rename_log.csv").exists()
@@ -492,15 +629,34 @@ def test_apply_recursive_row_stays_in_subfolder(tmp_path):
     video = sub / "a.mp4"
     video.write_bytes(b"abcdefghij")
     csv_path = tmp_path / "preview.csv"
-    write_preview_csv(str(csv_path), [PreviewRow(
-        True, os.path.join("sub", "a.mp4"), os.path.join("sub", "b.mp4"),
-        "fingerprint", 1.0, "s1", "", oshash_from_path(str(video)), 10,
-    )])
+    write_preview_csv(
+        str(csv_path),
+        [
+            PreviewRow(
+                True,
+                os.path.join("sub", "a.mp4"),
+                os.path.join("sub", "b.mp4"),
+                "fingerprint",
+                1.0,
+                "s1",
+                "",
+                oshash_from_path(str(video)),
+                10,
+            )
+        ],
+    )
 
-    code = main([
-        "apply", str(csv_path), "--root", str(tmp_path),
-        "--log", str(tmp_path / "rename_log.csv"), "--apply",
-    ])
+    code = main(
+        [
+            "apply",
+            str(csv_path),
+            "--root",
+            str(tmp_path),
+            "--log",
+            str(tmp_path / "rename_log.csv"),
+            "--apply",
+        ]
+    )
 
     assert code == 0
     assert (sub / "b.mp4").exists()
@@ -508,8 +664,7 @@ def test_apply_recursive_row_stays_in_subfolder(tmp_path):
 
 
 def test_apply_missing_csv_exits_2(tmp_path, capsys):
-    code = main(["apply", str(tmp_path / "nope.csv"),
-                 "--root", str(tmp_path), "--apply"])
+    code = main(["apply", str(tmp_path / "nope.csv"), "--root", str(tmp_path), "--apply"])
     assert code == 2
     assert capsys.readouterr().err
 
@@ -525,8 +680,9 @@ def test_apply_csv_parser_error_exits_2_without_traceback(tmp_path, capsys):
         encoding="utf-8-sig",
     )
 
-    code = main(["apply", str(csv_path), "--root", str(tmp_path),
-                 "--log", str(tmp_path / "rename_log.csv")])
+    code = main(
+        ["apply", str(csv_path), "--root", str(tmp_path), "--log", str(tmp_path / "rename_log.csv")]
+    )
 
     assert code == 2
     err = capsys.readouterr().err
@@ -539,12 +695,9 @@ def test_apply_csv_parser_error_exits_2_without_traceback(tmp_path, capsys):
 def test_append_rename_log_only_renamed_and_header_once(tmp_path):
     log = tmp_path / "rename_log.csv"
     rows = [
-        PreviewRow(True, "a.mp4", "b.mp4", "fingerprint", 1.0,
-                   "scene-a", "", "hash-a", 10),
-        PreviewRow(False, "c.mp4", "d.mp4", "text", 0.5,
-                   "scene-c", "", "hash-c", 20),
-        PreviewRow(True, "e.mp4", "f.mp4", "heuristic", 0.0,
-                   "", "", "hash-e", 30),
+        PreviewRow(True, "a.mp4", "b.mp4", "fingerprint", 1.0, "scene-a", "", "hash-a", 10),
+        PreviewRow(False, "c.mp4", "d.mp4", "text", 0.5, "scene-c", "", "hash-c", 20),
+        PreviewRow(True, "e.mp4", "f.mp4", "heuristic", 0.0, "", "", "hash-e", 30),
     ]
     results = [
         ApplyResult("a.mp4", "b.mp4", "renamed", ""),
@@ -555,8 +708,7 @@ def test_append_rename_log_only_renamed_and_header_once(tmp_path):
     append_rename_log(str(log), rows, results, "2026-11-04T12:00:00Z", root=root)
     append_rename_log(
         str(log),
-        [PreviewRow(True, "g.mp4", "h.mp4", "text", 0.9,
-                    "scene-g", "", "hash-g", 40)],
+        [PreviewRow(True, "g.mp4", "h.mp4", "text", 0.9, "scene-g", "", "hash-g", 40)],
         [ApplyResult("g.mp4", "h.mp4", "renamed", "")],
         "2026-11-04T12:01:00Z",
         root=root,
@@ -564,24 +716,23 @@ def test_append_rename_log_only_renamed_and_header_once(tmp_path):
 
     text = log.read_text(encoding="utf-8-sig")
     lines = text.strip().splitlines()
-    assert lines[0] == (
-        "timestamp;action;undoes;root;old;new;oshash;size;scene_id;source"
-    )
+    assert lines[0] == ("timestamp;action;undoes;root;old;new;oshash;size;scene_id;source")
     assert len(lines) == 3
     assert lines[1] == (
         f"2026-11-04T12:00:00Z;rename;;{root};a.mp4;b.mp4;hash-a;10;scene-a;fingerprint"
     )
-    assert lines[2] == (
-        f"2026-11-04T12:01:00Z;rename;;{root};g.mp4;h.mp4;hash-g;40;scene-g;text"
-    )
+    assert lines[2] == (f"2026-11-04T12:01:00Z;rename;;{root};g.mp4;h.mp4;hash-g;40;scene-g;text")
     assert "c.mp4" not in text
     assert "e.mp4" not in text
 
 
 def test_append_rename_log_writes_all_fields(tmp_path):
     log = tmp_path / "rename_log.csv"
-    rows = [PreviewRow(True, "old.mp4", "new.mp4", "fingerprint", 1.0,
-                       "scene-42", "note", "deadbeef", 123)]
+    rows = [
+        PreviewRow(
+            True, "old.mp4", "new.mp4", "fingerprint", 1.0, "scene-42", "note", "deadbeef", 123
+        )
+    ]
     results = [ApplyResult("old.mp4", "new.mp4", "renamed", "")]
 
     root = str(tmp_path)
@@ -589,7 +740,14 @@ def test_append_rename_log_writes_all_fields(tmp_path):
 
     fields = log.read_text(encoding="utf-8-sig").splitlines()[1].split(";")
     assert fields == [
-        "2026-11-04T12:00:00Z", "rename", "", root, "old.mp4", "new.mp4",
-        "deadbeef", "123", "scene-42", "fingerprint",
+        "2026-11-04T12:00:00Z",
+        "rename",
+        "",
+        root,
+        "old.mp4",
+        "new.mp4",
+        "deadbeef",
+        "123",
+        "scene-42",
+        "fingerprint",
     ]
-

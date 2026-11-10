@@ -22,7 +22,7 @@ def test_dates_and_windows_sanitization():
     assert format_scene_date("2026-10-03") == "03.10.2026"
     assert format_scene_date("2026-10") == "10.2026"
     assert format_scene_date("2026") == "2026"
-    assert sanitize_windows_stem('A/B: C?') == "A B C"
+    assert sanitize_windows_stem("A/B: C?") == "A B C"
     assert sanitize_windows_stem("CON") == "_CON"
     assert sanitize_windows_stem("Olivia del Río") == "Olivia del Río"
     assert is_valid_final_stem("Normal")
@@ -63,53 +63,89 @@ def test_is_valid_final_stem_rules():
 
 
 def test_scene_stem_uses_official_fields():
-    scene = Scene(id="s1", title="Poking Glory", release_date="2026-10-03",
-                  date=None, code="GP1", duration=1,
-                  studio=Studio("st", "BrazzersExxtra"),
-                  performers=(Performer("p", "Ryan Reid"),))
+    scene = Scene(
+        id="s1",
+        title="Poking Glory",
+        release_date="2026-10-03",
+        date=None,
+        code="GP1",
+        duration=1,
+        studio=Studio("st", "BrazzersExxtra"),
+        performers=(Performer("p", "Ryan Reid"),),
+    )
     local = LocalNameInfo("old", "03.10.2026", "BrazzersExxtra", "old title")
-    assert build_scene_stem(scene, local, {}) == \
-        "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory"
+    assert (
+        build_scene_stem(scene, local, {})
+        == "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory"
+    )
 
 
 def test_scene_stem_keeps_official_casing():
-    scene = Scene(id="s1", title="POKING glory (Remastered)", release_date="2026-10",
-                  date=None, code=None, duration=None,
-                  studio=Studio("st", "brazzersExxtra"),
-                  performers=(Performer("p", "ryan REID", "ryan REID"),))
+    scene = Scene(
+        id="s1",
+        title="POKING glory (Remastered)",
+        release_date="2026-10",
+        date=None,
+        code=None,
+        duration=None,
+        studio=Studio("st", "brazzersExxtra"),
+        performers=(Performer("p", "ryan REID", "ryan REID"),),
+    )
     local = LocalNameInfo("x", None, "LocalStudio", "local rest")
-    assert build_scene_stem(scene, local, {}) == \
-        "brazzersExxtra - 10.2026 - ryan REID - POKING glory (Remastered)"
+    assert (
+        build_scene_stem(scene, local, {})
+        == "brazzersExxtra - 10.2026 - ryan REID - POKING glory (Remastered)"
+    )
 
 
 def test_scene_stem_falls_back_to_date_field_local_studio_and_rest():
-    scene = Scene(id="s1", title=None, release_date=None, date="2025-07",
-                  code=None, duration=None, studio=None, performers=())
+    scene = Scene(
+        id="s1",
+        title=None,
+        release_date=None,
+        date="2025-07",
+        code=None,
+        duration=None,
+        studio=None,
+        performers=(),
+    )
     local = LocalNameInfo("x", "01.02.2024", "LocalStudio", "local title")
-    assert build_scene_stem(scene, local, {}) == \
-        "LocalStudio - 07.2025 - local title"
+    assert build_scene_stem(scene, local, {}) == "LocalStudio - 07.2025 - local title"
 
 
 def test_scene_stem_uses_local_date_when_scene_has_none():
-    scene = Scene(id="s1", title="Title", release_date=None, date=None,
-                  code=None, duration=None, studio=None, performers=())
+    scene = Scene(
+        id="s1",
+        title="Title",
+        release_date=None,
+        date=None,
+        code=None,
+        duration=None,
+        studio=None,
+        performers=(),
+    )
     local = LocalNameInfo("x", "01.02.2024", None, "local rest")
     assert build_scene_stem(scene, local, {}) == "01.02.2024 - Title"
 
 
 def test_scene_stem_sanitizes_forbidden_characters():
-    scene = Scene(id="s1", title='A/B: "C"?', release_date="2026",
-                  date=None, code=None, duration=None, studio=None,
-                  performers=(Performer("p", "Ryan/Reid"),))
+    scene = Scene(
+        id="s1",
+        title='A/B: "C"?',
+        release_date="2026",
+        date=None,
+        code=None,
+        duration=None,
+        studio=None,
+        performers=(Performer("p", "Ryan/Reid"),),
+    )
     local = LocalNameInfo("x", None, None, "")
     assert build_scene_stem(scene, local, {}) == "2026 - Ryan Reid - A B C"
 
 
 def test_parse_local_name_extracts_parts():
     studios = {"brazzersexxtra": "BrazzersExxtra"}
-    local = parse_local_name(
-        "BrazzersExxtra.26.10.03.ryan.reid.poking.glory.mp4", studios
-    )
+    local = parse_local_name("BrazzersExxtra.26.10.03.ryan.reid.poking.glory.mp4", studios)
     assert local == LocalNameInfo(
         stem="BrazzersExxtra.26.10.03.ryan.reid.poking.glory",
         date="03.10.2026",
@@ -120,9 +156,7 @@ def test_parse_local_name_extracts_parts():
 
 def test_parse_local_name_handles_clean_name():
     studios = {"vrbangers": "Vrbangers"}
-    local = parse_local_name(
-        "Vrbangers - 22.12.2025 - Gabbie Carter - Title.mp4", studios
-    )
+    local = parse_local_name("Vrbangers - 22.12.2025 - Gabbie Carter - Title.mp4", studios)
     assert local.date == "22.12.2025"
     assert local.studio == "Vrbangers"
     assert local.rest == "Gabbie Carter - Title"
@@ -130,9 +164,7 @@ def test_parse_local_name_handles_clean_name():
 
 def test_build_heuristic_stem_matches_clean_stem():
     studios = {"brazzersexxtra": "BrazzersExxtra"}
-    local = parse_local_name(
-        "brazzersexxtra.26.10.03.ryan.reid.poking.glory.mp4", studios
-    )
+    local = parse_local_name("brazzersexxtra.26.10.03.ryan.reid.poking.glory.mp4", studios)
     expected = clean_stem(local.stem, studios)
     assert expected == "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory"
     assert build_heuristic_stem(local, studios) == expected
@@ -141,16 +173,26 @@ def test_build_heuristic_stem_matches_clean_stem():
 # --- scoring, text selection and resolution ---------------------------------
 
 
-def scene(i="s1", title="Poking Glory", performers=("Ryan Reid",),
-          studio="BrazzersExxtra", date="2026-10-03"):
-    return Scene(i, title, date, None, None, 1,
-                 Studio("st", studio) if studio else None,
-                 tuple(Performer(f"p{idx}", name)
-                       for idx, name in enumerate(performers)))
+def scene(
+    i="s1",
+    title="Poking Glory",
+    performers=("Ryan Reid",),
+    studio="BrazzersExxtra",
+    date="2026-10-03",
+):
+    return Scene(
+        i,
+        title,
+        date,
+        None,
+        None,
+        1,
+        Studio("st", studio) if studio else None,
+        tuple(Performer(f"p{idx}", name) for idx, name in enumerate(performers)),
+    )
 
 
-def local(rest="Ryan Reid Poking Glory",
-          stem="BrazzersExxtra 03.10.2026 Ryan Reid Poking Glory"):
+def local(rest="Ryan Reid Poking Glory", stem="BrazzersExxtra 03.10.2026 Ryan Reid Poking Glory"):
     return LocalNameInfo(stem, "03.10.2026", "BrazzersExxtra", rest)
 
 
@@ -163,9 +205,7 @@ def test_normalize_strips_punctuation_and_diacritics():
 def test_score_scene_renormalizes_missing_performer_signal():
     scored = score_scene(scene(performers=()), local(rest="Poking Glory"), {})
     assert scored.performer_hit == 0.0
-    assert scored.score == pytest.approx(
-        (0.50 * scored.title_sim + 0.10 + 0.10) / 0.70
-    )
+    assert scored.score == pytest.approx((0.50 * scored.title_sim + 0.10 + 0.10) / 0.70)
 
 
 def test_score_scene_drops_unavailable_date_signal():
@@ -177,15 +217,11 @@ def test_score_scene_drops_unavailable_date_signal():
     )
     scored = score_scene(scene(), local_no_date, {})
     assert scored.date_hit == 0.0
-    assert scored.score == pytest.approx(
-        (0.50 * scored.title_sim + 0.20 + 0.10) / 0.80
-    )
+    assert scored.score == pytest.approx((0.50 * scored.title_sim + 0.20 + 0.10) / 0.80)
 
 
 def test_score_scene_performer_hit_is_fraction_found():
-    scored = score_scene(
-        scene(performers=("Ryan Reid", "Someone Else")), local(), {}
-    )
+    scored = score_scene(scene(performers=("Ryan Reid", "Someone Else")), local(), {})
     assert scored.performer_hit == pytest.approx(0.5)
 
 
@@ -220,8 +256,10 @@ def test_unique_fingerprint_is_approved():
 
 def test_unique_fingerprint_without_usable_name_falls_back():
     result = resolve_match(
-        LocalNameInfo("random", None, None, ""), {},
-        [scene(title=None, performers=(), studio=None, date=None)], []
+        LocalNameInfo("random", None, None, ""),
+        {},
+        [scene(title=None, performers=(), studio=None, date=None)],
+        [],
     )
     assert result.source == "fingerprint"
     assert result.approved is False
@@ -231,8 +269,7 @@ def test_unique_fingerprint_without_usable_name_falls_back():
 
 def test_unique_fingerprint_empty_scene_ignores_local_blocks():
     result = resolve_match(
-        local(), {},
-        [scene(title=None, performers=(), studio=None, date=None)], []
+        local(), {}, [scene(title=None, performers=(), studio=None, date=None)], []
     )
     assert result.source == "fingerprint"
     assert result.approved is False
@@ -249,8 +286,7 @@ def test_unique_fingerprint_with_invalid_stem_falls_back():
 
 
 def test_multiple_fingerprints_pick_best_and_list_ids():
-    result = resolve_match(local(), {}, [scene("s2", "Totally Different"),
-                                        scene("s1")], [])
+    result = resolve_match(local(), {}, [scene("s2", "Totally Different"), scene("s1")], [])
     assert result.source == "fingerprint"
     assert result.confidence == 0.99
     assert result.scene.id == "s1"
@@ -260,8 +296,9 @@ def test_multiple_fingerprints_pick_best_and_list_ids():
 
 
 def test_low_text_score_falls_back_to_heuristic():
-    result = resolve_match(LocalNameInfo("x", None, None, "totally different"),
-                           {}, [], [scene(title="Another Movie")])
+    result = resolve_match(
+        LocalNameInfo("x", None, None, "totally different"), {}, [], [scene(title="Another Movie")]
+    )
     assert result.source == "heuristic"
     assert result.approved is False
     assert result.scene is None
@@ -272,9 +309,7 @@ def test_low_text_score_falls_back_to_heuristic():
 
 def test_heuristic_fallback_lists_only_top_three_candidates():
     scenes = [scene(f"s{i}", f"Unrelated {i}") for i in range(4)]
-    result = resolve_match(
-        LocalNameInfo("x", None, None, "totally different"), {}, [], scenes
-    )
+    result = resolve_match(LocalNameInfo("x", None, None, "totally different"), {}, [], scenes)
     assert result.source == "heuristic"
     assert len(result.candidates) == 3
 
@@ -289,30 +324,26 @@ def test_phash_single_scene_is_never_approved():
 
 
 def test_phash_multiple_scenes_list_candidates():
-    result = resolve_match(local(), {}, [], [],
-                           phash_scenes=[scene("a"), scene("b")])
+    result = resolve_match(local(), {}, [], [], phash_scenes=[scene("a"), scene("b")])
     assert [s.id for s in result.candidates] == ["a", "b"]
     assert result.approved is False
     assert result.note.startswith("phash")
 
 
 def test_phash_skips_text_search():
-    result = resolve_match(local(), {}, [], [scene("t")],
-                           phash_scenes=[scene("p")])
+    result = resolve_match(local(), {}, [], [scene("t")], phash_scenes=[scene("p")])
     assert result.source == "phash"
     assert result.scene.id == "p"
 
 
 def test_secondary_scene_without_title_is_not_approved():
-    sparse = Scene("x", None, None, None, None, None, None, (),
-                   source="ThePornDB")
+    sparse = Scene("x", None, None, None, None, None, None, (), source="ThePornDB")
     result = resolve_match(local(), {}, [sparse], [])
     assert result.approved is False
 
 
 def test_text_match_is_not_auto_approved():
-    result = resolve_match(local("Poking Glory"), {}, [],
-                           [scene(), scene("s2", "Other")])
+    result = resolve_match(local("Poking Glory"), {}, [], [scene(), scene("s2", "Other")])
     assert result.source == "text"
     assert result.approved is False
     assert result.scene.id == "s1"
@@ -327,10 +358,14 @@ def test_text_match_ignores_performer_names_in_title_comparison():
         "Adriana Chechik-Fucking Fired Pov Anal",
     )
     candidate = Scene(
-        "s1", "Fucking Fired", "2020-02-22", None, "4411505", 1,
+        "s1",
+        "Fucking Fired",
+        "2020-02-22",
+        None,
+        "4411505",
+        1,
         Studio("st", "Brazzers Exxtra"),
-        (Performer("p1", "Manuel Ferrara"),
-         Performer("p2", "Adriana Chechik")),
+        (Performer("p1", "Manuel Ferrara"), Performer("p2", "Adriana Chechik")),
     )
     scored = score_scene(candidate, local_name, {})
     assert scored.title_sim >= 0.70
@@ -342,15 +377,19 @@ def test_text_match_ignores_performer_names_in_title_comparison():
 
 def test_text_match_rejects_same_performer_wrong_studio():
     local_name = LocalNameInfo(
-        "260714 thevictorbliss Milf Sneaks into Hot Tub & Seduces Owner "
-        "Taylor Vixxen 1080p",
+        "260714 thevictorbliss Milf Sneaks into Hot Tub & Seduces Owner Taylor Vixxen 1080p",
         "14.07.2026",
         None,
         "thevictorbliss Milf Sneaks into Hot Tub & Seduces Owner Taylor Vixxen",
     )
     wrong = Scene(
-        "s1", "Hot, blonde MILF Taylor Vixxen: Countdown to cum",
-        "2025-09-24", None, "79159", 1, Studio("st", "40 Something Mag"),
+        "s1",
+        "Hot, blonde MILF Taylor Vixxen: Countdown to cum",
+        "2025-09-24",
+        None,
+        "79159",
+        1,
+        Studio("st", "40 Something Mag"),
         (Performer("p1", "Taylor Vixxen"),),
     )
     scored = score_scene(wrong, local_name, {})
@@ -360,14 +399,18 @@ def test_text_match_rejects_same_performer_wrong_studio():
 
 def test_compact_date_and_performers_accept_correct_scene():
     local_name = parse_local_name(
-        "260625 Rossavaxx Hardcore Fucked Rossa Vaxx With A Brazilian Boy "
-        "4K Orig.mp4",
+        "260625 Rossavaxx Hardcore Fucked Rossa Vaxx With A Brazilian Boy 4K Orig.mp4",
         {},
     )
     assert local_name.date == "25.06.2026"
     candidate = Scene(
-        "s1", "HARDCORE fucked Rossa Vaxx with a BRAZILIAN BOY",
-        "2026-06-25", None, "4908160", 1, Studio("st", "Rossa Vaxx"),
+        "s1",
+        "HARDCORE fucked Rossa Vaxx with a BRAZILIAN BOY",
+        "2026-06-25",
+        None,
+        "4908160",
+        1,
+        Studio("st", "Rossa Vaxx"),
         (Performer("p1", "Air Thugger"), Performer("p2", "Rossa Vaxx")),
     )
     scored = score_scene(candidate, local_name, {})
@@ -378,16 +421,21 @@ def test_compact_date_and_performers_accept_correct_scene():
 def test_code_signal_matches_scene_code():
     local_name = LocalNameInfo("1135 Gia", None, None, "1135 Gia")
     candidate = Scene(
-        "s1", "Tryouts with Gia", "2018-01-03", None, "1135", 1,
-        Studio("st", "Net Video Girls"), (Performer("p1", "Gia"),),
+        "s1",
+        "Tryouts with Gia",
+        "2018-01-03",
+        None,
+        "1135",
+        1,
+        Studio("st", "Net Video Girls"),
+        (Performer("p1", "Gia"),),
     )
     scored = score_scene(candidate, local_name, {})
     assert scored.code_hit == 1.0
 
 
 def test_ambiguous_text_match_is_flagged():
-    result = resolve_match(local("Poking Glory"), {}, [],
-                           [scene("s1"), scene("s2")])
+    result = resolve_match(local("Poking Glory"), {}, [], [scene("s1"), scene("s2")])
     assert result.source == "text"
     assert result.approved is False
     assert result.note == "ambiguous"

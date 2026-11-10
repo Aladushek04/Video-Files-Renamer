@@ -7,8 +7,16 @@ from video_renamer.core.title_cache import TitleCache
 
 
 def make_scene(i="s1"):
-    return Scene(id=i, title="T", release_date=None, date=None, code=None,
-                 duration=None, studio=None, performers=())
+    return Scene(
+        id=i,
+        title="T",
+        release_date=None,
+        date=None,
+        code=None,
+        duration=None,
+        studio=None,
+        performers=(),
+    )
 
 
 def test_roundtrip_and_negative(tmp_path):
@@ -52,8 +60,15 @@ def test_fingerprint_and_text_query_keys_are_independent(tmp_path):
 
 def test_source_fingerprint_is_keyed_by_source_and_algorithm(tmp_path):
     cache = TitleCache(tmp_path / "c.sqlite3")
-    scene = Scene(id="x", title="T", release_date=None, date=None, code=None,
-                  duration=None, source="ThePornDB")
+    scene = Scene(
+        id="x",
+        title="T",
+        release_date=None,
+        date=None,
+        code=None,
+        duration=None,
+        source="ThePornDB",
+    )
     cache.put_source_fingerprint("ThePornDB", "OSHASH", "abc", [scene])
     assert cache.get_source_fingerprint("StashDB", "OSHASH", "abc") is None
     assert cache.get_source_fingerprint("ThePornDB", "PHASH", "abc") is None
@@ -73,10 +88,13 @@ def test_source_negative_result_is_kept(tmp_path):
 def test_legacy_fingerprints_migrated_once(tmp_path):
     path = tmp_path / "old.sqlite3"
     raw = sqlite3.connect(path)
-    raw.execute("CREATE TABLE fingerprints (hash TEXT PRIMARY KEY, "
-                "scenes TEXT NOT NULL, fetched_at TEXT NOT NULL)")
-    raw.execute("INSERT INTO fingerprints VALUES ('h1', '[]', ?)",
-                (datetime.now(timezone.utc).isoformat(),))
+    raw.execute(
+        "CREATE TABLE fingerprints (hash TEXT PRIMARY KEY, "
+        "scenes TEXT NOT NULL, fetched_at TEXT NOT NULL)"
+    )
+    raw.execute(
+        "INSERT INTO fingerprints VALUES ('h1', '[]', ?)", (datetime.now(timezone.utc).isoformat(),)
+    )
     raw.commit()
     raw.close()
 
@@ -106,8 +124,7 @@ def test_scene_fields_survive_the_roundtrip(tmp_path):
         date="2026-10-03",
         code="GP1",
         duration=1200,
-        studio=Studio(id="st1", name="BrazzersExxtra",
-                      parent_id="st0", parent_name="Brazzers"),
+        studio=Studio(id="st1", name="BrazzersExxtra", parent_id="st0", parent_name="Brazzers"),
         performers=(Performer(id="p1", name="Ryan Reid", alias="Ryan"),),
     )
     cache = TitleCache(tmp_path / "c.sqlite3")
@@ -158,8 +175,7 @@ def test_corrupt_json_is_treated_as_a_miss(tmp_path):
     cache.close()
 
     conn = sqlite3.connect(str(path))
-    conn.execute("UPDATE fingerprint_cache SET scenes = ? WHERE hash = ?",
-                 ("{not json", "h"))
+    conn.execute("UPDATE fingerprint_cache SET scenes = ? WHERE hash = ?", ("{not json", "h"))
     conn.commit()
     conn.close()
 
@@ -175,8 +191,7 @@ def test_corrupt_timestamp_is_treated_as_a_miss(tmp_path):
     cache.close()
 
     conn = sqlite3.connect(str(path))
-    conn.execute("UPDATE fingerprint_cache SET fetched_at = ? WHERE hash = ?",
-                 ("not-a-date", "h"))
+    conn.execute("UPDATE fingerprint_cache SET fetched_at = ? WHERE hash = ?", ("not-a-date", "h"))
     conn.commit()
     conn.close()
 

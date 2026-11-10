@@ -22,6 +22,7 @@
 
 Зависимостей нет — только стандартная библиотека.
 """
+
 import json
 import time
 import urllib.error
@@ -273,9 +274,7 @@ def scene_from_node(node: dict) -> Scene:
     """
     studio_node = node.get("studio")
     studio = (
-        studio_from_node(studio_node)
-        if isinstance(studio_node, dict) and studio_node
-        else None
+        studio_from_node(studio_node) if isinstance(studio_node, dict) and studio_node else None
     )
     performers = node.get("performers")
     if not isinstance(performers, list):
@@ -358,14 +357,10 @@ class StashDBClient:
 
         scenes_by_hash: dict[str, list[Scene]] = {}
         for start in range(0, len(unique_hashes), FINGERPRINT_BATCH_SIZE):
-            batch = unique_hashes[start:start + FINGERPRINT_BATCH_SIZE]
+            batch = unique_hashes[start : start + FINGERPRINT_BATCH_SIZE]
             data = self._post(
                 SCENES_BY_FINGERPRINTS_QUERY,
-                {
-                    "fingerprints": [
-                        [{"hash": h, "algorithm": algorithm}] for h in batch
-                    ]
-                },
+                {"fingerprints": [[{"hash": h, "algorithm": algorithm}] for h in batch]},
             )
             groups = data.get("findScenesBySceneFingerprints")
             if not isinstance(groups, list):
@@ -420,13 +415,9 @@ class StashDBClient:
             except urllib.error.HTTPError as exc:
                 status = exc.code
                 if status in (401, 403):
-                    raise StashDBAuthError(
-                        f"StashDB rejected the API key (HTTP {status})"
-                    ) from exc
+                    raise StashDBAuthError(f"StashDB rejected the API key (HTTP {status})") from exc
                 if status == 429:
-                    last_error = StashDBRateLimitError(
-                        "StashDB rate limit reached (HTTP 429)"
-                    )
+                    last_error = StashDBRateLimitError("StashDB rate limit reached (HTTP 429)")
                     if attempt + 1 >= self._max_attempts:
                         raise last_error from exc
                     retry_after = self._retry_after_seconds(exc)
@@ -435,20 +426,14 @@ class StashDBClient:
                     self._sleep(retry_after)
                     continue
                 if 500 <= status < 600:
-                    last_error = StashDBTransientError(
-                        f"StashDB server error (HTTP {status})"
-                    )
+                    last_error = StashDBTransientError(f"StashDB server error (HTTP {status})")
                     if attempt + 1 >= self._max_attempts:
                         raise last_error from exc
                     self._sleep(self._backoff_seconds(attempt))
                     continue
-                raise StashDBResponseError(
-                    f"StashDB returned unexpected HTTP {status}"
-                ) from exc
+                raise StashDBResponseError(f"StashDB returned unexpected HTTP {status}") from exc
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
-                last_error = StashDBTransientError(
-                    f"StashDB request failed: {exc}"
-                )
+                last_error = StashDBTransientError(f"StashDB request failed: {exc}")
                 if attempt + 1 >= self._max_attempts:
                     raise last_error from exc
                 self._sleep(self._backoff_seconds(attempt))
@@ -474,9 +459,7 @@ class StashDBClient:
             try:
                 text = raw.decode("utf-8")
             except UnicodeDecodeError as exc:
-                raise StashDBResponseError(
-                    "StashDB returned invalid UTF-8"
-                ) from exc
+                raise StashDBResponseError("StashDB returned invalid UTF-8") from exc
         elif isinstance(raw, str):
             text = raw
         else:
@@ -493,9 +476,7 @@ class StashDBClient:
         if errors:
             message = self._error_message(errors)
             if "not authorized" in message.lower():
-                raise StashDBAuthError(
-                    f"StashDB rejected the API key: {message}"
-                )
+                raise StashDBAuthError(f"StashDB rejected the API key: {message}")
             raise StashDBQueryError(message)
 
         data = payload.get("data")

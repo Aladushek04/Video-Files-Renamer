@@ -9,12 +9,13 @@
 
 Зависимостей нет — только стандартная библиотека.
 """
+
 import os
 
 __all__ = ["OshashError", "oshash_from_path"]
 
 CHUNK_SIZE = 64 * 1024
-_UINT64_MOD = 2 ** 64
+_UINT64_MOD = 2**64
 _MIN_SIZE = 8
 
 
@@ -24,9 +25,7 @@ class OshashError(ValueError):
 
 def _sum_bytes(buf: bytes) -> int:
     """Сумма 64-битных little-endian блоков; хвост короче 8 байт игнорируется."""
-    return sum(
-        int.from_bytes(buf[i:i + 8], "little") for i in range(0, len(buf) - 7, 8)
-    )
+    return sum(int.from_bytes(buf[i : i + 8], "little") for i in range(0, len(buf) - 7, 8))
 
 
 def _read_exact(f, count: int) -> bytes:

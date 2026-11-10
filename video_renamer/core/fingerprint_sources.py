@@ -8,6 +8,7 @@
 
 Зависимостей нет — только стандартная библиотека.
 """
+
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -68,14 +69,13 @@ def merge_scenes(per_source: Sequence[Sequence[Scene]]) -> list[Scene]:
 def missing_secondary_keys(env: Mapping[str, str]) -> list[FingerprintSource]:
     """Вторичные источники, для которых не задан ключ, в порядке приоритета."""
     return [
-        source for source in FINGERPRINT_SOURCES[1:]
+        source
+        for source in FINGERPRINT_SOURCES[1:]
         if not (env.get(source.api_key_env) or "").strip()
     ]
 
 
-def build_fingerprint_clients(
-    env: Mapping[str, str], *, offline: bool
-) -> dict[str, StashDBClient]:
+def build_fingerprint_clients(env: Mapping[str, str], *, offline: bool) -> dict[str, StashDBClient]:
     """Клиенты вторичных источников; без ключа источник пропускается.
 
     Клиент StashDB сюда не входит: он создаётся вызывающим кодом. Клиенты создаются
