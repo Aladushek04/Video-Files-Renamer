@@ -16,6 +16,7 @@
 ffmpeg и ffprobe вызываются списками аргументов без оболочки. Зависимостей
 нет — только стандартная библиотека.
 """
+
 import math
 import os
 import struct
@@ -91,8 +92,14 @@ def check_phash_tools(ffmpeg: str, ffprobe: str, run=subprocess.run) -> None:
 def probe_duration(path: str, ffprobe: str, run=subprocess.run) -> float:
     """Длительность файла в секундах по `format=duration`."""
     args = [
-        ffprobe, "-v", "error", "-show_entries", "format=duration",
-        "-of", "csv=p=0", path,
+        ffprobe,
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "csv=p=0",
+        path,
     ]
     try:
         result = _run(args, run, PROBE_TIMEOUT_SECONDS)
@@ -110,8 +117,7 @@ def probe_duration(path: str, ffprobe: str, run=subprocess.run) -> float:
     return duration
 
 
-def extract_frame(path: str, t: float, *, accurate: bool, ffmpeg: str,
-                  run=subprocess.run) -> bytes:
+def extract_frame(path: str, t: float, *, accurate: bool, ffmpeg: str, run=subprocess.run) -> bytes:
     """Один кадр в момент `t` как BMP. `accurate` — seek после `-i`."""
     args = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y"]
     if not accurate:
@@ -120,8 +126,15 @@ def extract_frame(path: str, t: float, *, accurate: bool, ffmpeg: str,
     if accurate:
         args += ["-ss", f"{t:.3f}"]
     args += [
-        "-frames:v", "1", "-vf", f"scale={FRAME_WIDTH}:-2",
-        "-c:v", "bmp", "-f", "rawvideo", "-",
+        "-frames:v",
+        "1",
+        "-vf",
+        f"scale={FRAME_WIDTH}:-2",
+        "-c:v",
+        "bmp",
+        "-f",
+        "rawvideo",
+        "-",
     ]
     try:
         result = _run(args, run, FRAME_TIMEOUT_SECONDS)
@@ -198,37 +211,25 @@ def resize_bilinear(gray: list[list[float]], out_w: int, out_h: int) -> list[lis
 
     wx = weights(in_w, out_w, scale_x)
     wy = weights(in_h, out_h, scale_y)
-    horizontal = [
-        [sum(row[j] * w for j, w in taps) for taps in wx] for row in gray
-    ]
+    horizontal = [[sum(row[j] * w for j, w in taps) for taps in wx] for row in gray]
     result = []
     for taps in wy:
-        result.append([
-            sum(horizontal[j][x] * w for j, w in taps) for x in range(out_w)
-        ])
+        result.append([sum(horizontal[j][x] * w for j, w in taps) for x in range(out_w)])
     return result
 
 
 def dct_top_left_8x8(pixels64: list[list[float]]) -> list[float]:
     """Левый верхний блок 8×8 DCT-II без нормировки; `flat[8*j+i]`."""
     n = HASH_SIZE
-    cos_table = [
-        [math.cos(math.pi / n * (i + 0.5) * k) for i in range(n)]
-        for k in range(DCT_SIZE)
-    ]
+    cos_table = [[math.cos(math.pi / n * (i + 0.5) * k) for i in range(n)] for k in range(DCT_SIZE)]
     rows_k = []
     for row in pixels64:
-        rows_k.append([
-            sum(row[i] * cos_table[k][i] for i in range(n))
-            for k in range(DCT_SIZE)
-        ])
+        rows_k.append([sum(row[i] * cos_table[k][i] for i in range(n)) for k in range(DCT_SIZE)])
     flat = [0.0] * (DCT_SIZE * DCT_SIZE)
     for col in range(DCT_SIZE):
         column = [rows_k[r][col] for r in range(n)]
         for j in range(DCT_SIZE):
-            flat[DCT_SIZE * j + col] = sum(
-                column[r] * cos_table[j][r] for r in range(n)
-            )
+            flat[DCT_SIZE * j + col] = sum(column[r] * cos_table[j][r] for r in range(n))
     return flat
 
 
@@ -260,8 +261,7 @@ def format_phash(value: int) -> str:
     return f"{value:016x}"
 
 
-def phash_from_path(path: str, *, ffmpeg: str, ffprobe: str,
-                    run=subprocess.run) -> int:
+def phash_from_path(path: str, *, ffmpeg: str, ffprobe: str, run=subprocess.run) -> int:
     """PHASH видеофайла как 64-битное целое."""
     path = os.path.abspath(path)
     duration = probe_duration(path, ffprobe, run)

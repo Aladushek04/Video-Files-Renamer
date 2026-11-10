@@ -90,9 +90,7 @@ def test_normalize_studio_key_strips_separators():
 
 def test_prepare_stem_returns_parts():
     studios = {"brazzersexxtra": "BrazzersExxtra"}
-    rest, date, studio = prepare_stem(
-        "brazzers-exxtra 26.10.03 ryan reid poking glory", studios
-    )
+    rest, date, studio = prepare_stem("brazzers-exxtra 26.10.03 ryan reid poking glory", studios)
     assert rest == "ryan reid poking glory"
     assert date == "03.10.2026"
     assert studio == "BrazzersExxtra"
@@ -109,8 +107,14 @@ def test_split_actors_title_comma():
 
 def test_clean_stem_vrbangers_example():
     studios = {"vrbangers": "Vrbangers"}
-    out = clean_stem("vrbangers 22.12.2025 Gabbie Carter, Karma Rx Sorority Hookup Party Never Ends (Remastered)", studios)
-    assert out == "Vrbangers - 22.12.2025 - Gabbie Carter, Karma Rx - Sorority Hookup Party Never Ends (Remastered)"
+    out = clean_stem(
+        "vrbangers 22.12.2025 Gabbie Carter, Karma Rx Sorority Hookup Party Never Ends (Remastered)",
+        studios,
+    )
+    assert (
+        out
+        == "Vrbangers - 22.12.2025 - Gabbie Carter, Karma Rx - Sorority Hookup Party Never Ends (Remastered)"
+    )
 
 
 def test_eporner_prefix_stripped():

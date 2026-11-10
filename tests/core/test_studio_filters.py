@@ -1,4 +1,5 @@
 """Тесты фильтра мусорных имён студий из больших stash-box источников."""
+
 from video_renamer.core.studio_filters import filter_studio_names, is_useful_studio_name
 
 
@@ -40,12 +41,14 @@ def test_drops_placeholders_and_generated_ids():
 
 
 def test_filter_returns_kept_names_and_dropped_count():
-    kept, dropped = filter_studio_names([
-        "Brazzers",
-        "000000h (ManyVids)",
-        "4based (network)",
-        "+AddFriends (network)",
-        "Hussie Pass",
-    ])
+    kept, dropped = filter_studio_names(
+        [
+            "Brazzers",
+            "000000h (ManyVids)",
+            "4based (network)",
+            "+AddFriends (network)",
+            "Hussie Pass",
+        ]
+    )
     assert kept == ["Brazzers", "4based (network)", "Hussie Pass"]
     assert dropped == 2

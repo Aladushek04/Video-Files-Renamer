@@ -1,4 +1,5 @@
 """Headless smoke-тесты Textual-интерфейса (нужен textual)."""
+
 import asyncio
 import threading
 import time
@@ -26,16 +27,37 @@ from video_renamer.ui.tui import DirectoryPicker, RenamerApp
 
 ROWS = (
     PreviewRow(
-        True, "old1.mp4", "Brazzers - 01.01.2025 - Title.mp4",
-        "fingerprint", 1.0, "s1", "", "h1", 10,
+        True,
+        "old1.mp4",
+        "Brazzers - 01.01.2025 - Title.mp4",
+        "fingerprint",
+        1.0,
+        "s1",
+        "",
+        "h1",
+        10,
     ),
     PreviewRow(
-        False, "old2.mp4", "New Text.mp4", "text", 0.76, "s2",
-        "text: score=0.760", "h2", 10,
+        False,
+        "old2.mp4",
+        "New Text.mp4",
+        "text",
+        0.76,
+        "s2",
+        "text: score=0.760",
+        "h2",
+        10,
     ),
     PreviewRow(
-        False, "old3.mp4", "Heuristic.mp4", "heuristic", 0.0, "",
-        "no match", "h3", 10,
+        False,
+        "old3.mp4",
+        "Heuristic.mp4",
+        "heuristic",
+        0.0,
+        "",
+        "no match",
+        "h3",
+        10,
     ),
 )
 
@@ -57,8 +79,7 @@ ROWS_WITH_CANDIDATES = (
     ROWS[0],
     replace(
         ROWS[1],
-        candidates=(pick_scene("alt1", "First Choice"),
-                    pick_scene("alt2", "Second Choice")),
+        candidates=(pick_scene("alt1", "First Choice"), pick_scene("alt2", "Second Choice")),
     ),
     ROWS[2],
 )
@@ -92,11 +113,24 @@ def _rename_log_with(tmp_path, old="a.mp4", new="b.mp4"):
     from video_renamer.core.rename_log import LogEntry, append_log, format_log_timestamp
 
     log = tmp_path / "rename_log.csv"
-    append_log(str(log), [LogEntry(
-        timestamp=format_log_timestamp(), action="rename", undoes="",
-        root=str(tmp_path), old=old, new=new, oshash=oshash_from_path(str(tmp_path / new)),
-        size=100, scene_id="s1", source="fingerprint", legacy=False,
-    )])
+    append_log(
+        str(log),
+        [
+            LogEntry(
+                timestamp=format_log_timestamp(),
+                action="rename",
+                undoes="",
+                root=str(tmp_path),
+                old=old,
+                new=new,
+                oshash=oshash_from_path(str(tmp_path / new)),
+                size=100,
+                scene_id="s1",
+                source="fingerprint",
+                legacy=False,
+            )
+        ],
+    )
     return log
 
 
@@ -229,10 +263,18 @@ def test_undo_shows_unwritten_journal_rows(tmp_path, monkeypatch):
         if dry_run:
             return real_run_undo(selection, log_path=log_path, dry_run=True, now=now)
         target = selection.targets[0].entry
-        return UndoReport((UndoResult(
-            target.id, target.new, target.old, "journal-missing",
-            "откат выполнен, журнал не записан: locked",
-        ),), True)
+        return UndoReport(
+            (
+                UndoResult(
+                    target.id,
+                    target.new,
+                    target.old,
+                    "journal-missing",
+                    "откат выполнен, журнал не записан: locked",
+                ),
+            ),
+            True,
+        )
 
     monkeypatch.setattr(tui_module, "run_undo", unwritten)
     (tmp_path / "b.mp4").write_bytes(b"b" * 100)
@@ -297,9 +339,7 @@ def test_app_apply_modal_runs_fake_apply(tmp_path):
             preview_factory=lambda folder, progress: PreviewReport(
                 rows=ROWS, warnings=(), had_transient_errors=False
             ),
-            apply_factory=lambda rows: ApplyReport(
-                results=(), had_errors=False
-            ),
+            apply_factory=lambda rows: ApplyReport(results=(), had_errors=False),
         )
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.click("#preview")
@@ -347,8 +387,15 @@ def test_apply_log_failure_does_not_hide_results(tmp_path, monkeypatch):
     video = tmp_path / "old1.mp4"
     video.write_bytes(b"abcdefghij")
     row = PreviewRow(
-        True, "old1.mp4", "new1.mp4", "fingerprint", 1.0, "s1", "",
-        oshash_from_path(str(video)), 10,
+        True,
+        "old1.mp4",
+        "new1.mp4",
+        "fingerprint",
+        1.0,
+        "s1",
+        "",
+        oshash_from_path(str(video)),
+        10,
     )
 
     async def run() -> None:
@@ -376,12 +423,9 @@ def test_apply_log_failure_does_not_hide_results(tmp_path, monkeypatch):
 
 def test_apply_keeps_failed_rows_for_retry(tmp_path):
     rows = (
-        PreviewRow(True, "ok.mp4", "ok-new.mp4", "fingerprint", 1.0, "s1",
-                   "", "h1", 10),
-        PreviewRow(True, "bad.mp4", "bad-new.mp4", "text", 0.8, "s2",
-                   "", "h2", 10),
-        PreviewRow(False, "pending.mp4", "pending-new.mp4", "heuristic",
-                   0.0, "", "", "h3", 10),
+        PreviewRow(True, "ok.mp4", "ok-new.mp4", "fingerprint", 1.0, "s1", "", "h1", 10),
+        PreviewRow(True, "bad.mp4", "bad-new.mp4", "text", 0.8, "s2", "", "h2", 10),
+        PreviewRow(False, "pending.mp4", "pending-new.mp4", "heuristic", 0.0, "", "", "h3", 10),
     )
     report = ApplyReport(
         results=(
@@ -408,9 +452,7 @@ def test_apply_keeps_failed_rows_for_retry(tmp_path):
             await pilot.click("#confirm-apply")
             await app.workers.wait_for_complete()
             await pilot.pause()
-            assert [row.old_rel for row in app.model.rows] == [
-                "bad.mp4", "pending.mp4"
-            ]
+            assert [row.old_rel for row in app.model.rows] == ["bad.mp4", "pending.mp4"]
             assert app.model.rows[0].approved is True
             assert app.query_one("#table").row_count == 2
 
@@ -470,8 +512,16 @@ def test_busy_blocks_edit_and_approval(tmp_path):
             assert app.model.rows[0].approved is True
             assert not app.query("#name-dialog")
             for selector in (
-                "#browse", "#folder", "#filter", "#approve", "#reject",
-                "#edit", "#candidates", "#studios", "#preview", "#apply",
+                "#browse",
+                "#folder",
+                "#filter",
+                "#approve",
+                "#reject",
+                "#edit",
+                "#candidates",
+                "#studios",
+                "#preview",
+                "#apply",
             ):
                 assert app.query_one(selector).disabled, selector
 
@@ -687,7 +737,8 @@ def test_directory_picker_navigates_into_subfolder_and_chooses_it(tmp_path):
 
             options = picker.query_one("#picker-list", OptionList)
             index = next(
-                i for i in range(options.option_count)
+                i
+                for i in range(options.option_count)
                 if options.get_option_at_index(i).id == str(target)
             )
             options.highlighted = index

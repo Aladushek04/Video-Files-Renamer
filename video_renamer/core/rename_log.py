@@ -12,6 +12,7 @@
 
 Зависимостей нет — только стандартная библиотека.
 """
+
 import csv
 import glob
 import hashlib
@@ -31,8 +32,16 @@ __all__ = [
 ]
 
 LOG_FIELDS = (
-    "timestamp", "action", "undoes", "root", "old", "new",
-    "oshash", "size", "scene_id", "source",
+    "timestamp",
+    "action",
+    "undoes",
+    "root",
+    "old",
+    "new",
+    "oshash",
+    "size",
+    "scene_id",
+    "source",
 )
 LEGACY_FIELDS = ("timestamp", "old", "new", "oshash", "scene_id", "source")
 ACTION_RENAME = "rename"
@@ -74,8 +83,7 @@ def _guard_formula(value: str) -> str:
     не путается с защитным.
     """
     if value.startswith(_FORMULA_PREFIXES) or (
-        value.startswith("'")
-        and value.lstrip("'").startswith(_FORMULA_PREFIXES)
+        value.startswith("'") and value.lstrip("'").startswith(_FORMULA_PREFIXES)
     ):
         return "'" + value
     return value
@@ -83,8 +91,7 @@ def _guard_formula(value: str) -> str:
 
 def _unguard_formula(value: str) -> str:
     """Снимает ровно один защитный апостроф, добавленный `_guard_formula`."""
-    if (value.startswith("'")
-            and value.lstrip("'").startswith(_FORMULA_PREFIXES)):
+    if value.startswith("'") and value.lstrip("'").startswith(_FORMULA_PREFIXES):
         return value[1:]
     return value
 
@@ -139,33 +146,37 @@ def _read_file(path: str) -> list[LogEntry]:
                 continue
             data = dict(zip(header, record))
             if legacy:
-                entries.append(LogEntry(
-                    timestamp=data.get("timestamp", ""),
-                    action=ACTION_RENAME,
-                    undoes="",
-                    root="",
-                    old=_unguard_formula(data.get("old", "")),
-                    new=_unguard_formula(data.get("new", "")),
-                    oshash=data.get("oshash", ""),
-                    size=None,
-                    scene_id=data.get("scene_id", ""),
-                    source=data.get("source", ""),
-                    legacy=True,
-                ))
+                entries.append(
+                    LogEntry(
+                        timestamp=data.get("timestamp", ""),
+                        action=ACTION_RENAME,
+                        undoes="",
+                        root="",
+                        old=_unguard_formula(data.get("old", "")),
+                        new=_unguard_formula(data.get("new", "")),
+                        oshash=data.get("oshash", ""),
+                        size=None,
+                        scene_id=data.get("scene_id", ""),
+                        source=data.get("source", ""),
+                        legacy=True,
+                    )
+                )
             else:
-                entries.append(LogEntry(
-                    timestamp=data.get("timestamp", ""),
-                    action=data.get("action", "") or ACTION_RENAME,
-                    undoes=data.get("undoes", ""),
-                    root=data.get("root", ""),
-                    old=_unguard_formula(data.get("old", "")),
-                    new=_unguard_formula(data.get("new", "")),
-                    oshash=data.get("oshash", ""),
-                    size=_parse_size(data.get("size", "")),
-                    scene_id=data.get("scene_id", ""),
-                    source=data.get("source", ""),
-                    legacy=False,
-                ))
+                entries.append(
+                    LogEntry(
+                        timestamp=data.get("timestamp", ""),
+                        action=data.get("action", "") or ACTION_RENAME,
+                        undoes=data.get("undoes", ""),
+                        root=data.get("root", ""),
+                        old=_unguard_formula(data.get("old", "")),
+                        new=_unguard_formula(data.get("new", "")),
+                        oshash=data.get("oshash", ""),
+                        size=_parse_size(data.get("size", "")),
+                        scene_id=data.get("scene_id", ""),
+                        source=data.get("source", ""),
+                        legacy=False,
+                    )
+                )
     return entries
 
 
@@ -188,10 +199,7 @@ def read_log(path: str) -> list[LogEntry]:
 def active_renames(entries: Sequence[LogEntry]) -> list[LogEntry]:
     """Строки `rename`, которые не откатены записью `undo`."""
     undone = {entry.undoes for entry in entries if entry.action == ACTION_UNDO}
-    return [
-        entry for entry in entries
-        if entry.action == ACTION_RENAME and entry.id not in undone
-    ]
+    return [entry for entry in entries if entry.action == ACTION_RENAME and entry.id not in undone]
 
 
 def _is_legacy_file(path: str) -> bool:
@@ -228,9 +236,7 @@ def _migrate_legacy(path: str) -> None:
     try:
         os.replace(path, target)
     except OSError as exc:
-        raise LogMigrationError(
-            f"cannot move legacy rename log {path} to {target}: {exc}"
-        ) from exc
+        raise LogMigrationError(f"cannot move legacy rename log {path} to {target}: {exc}") from exc
 
 
 def append_log(path: str, entries: Sequence[LogEntry]) -> None:
@@ -252,15 +258,17 @@ def append_log(path: str, entries: Sequence[LogEntry]) -> None:
         if not exists:
             writer.writerow(LOG_FIELDS)
         for entry in entries:
-            writer.writerow((
-                entry.timestamp,
-                entry.action,
-                entry.undoes,
-                entry.root,
-                _guard_formula(entry.old),
-                _guard_formula(entry.new),
-                entry.oshash,
-                "" if entry.size is None else str(entry.size),
-                entry.scene_id,
-                entry.source,
-            ))
+            writer.writerow(
+                (
+                    entry.timestamp,
+                    entry.action,
+                    entry.undoes,
+                    entry.root,
+                    _guard_formula(entry.old),
+                    _guard_formula(entry.new),
+                    entry.oshash,
+                    "" if entry.size is None else str(entry.size),
+                    entry.scene_id,
+                    entry.source,
+                )
+            )

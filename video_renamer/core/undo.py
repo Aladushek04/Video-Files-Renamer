@@ -13,6 +13,7 @@
 
 Зависимостей нет — только стандартная библиотека.
 """
+
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -166,8 +167,11 @@ def run_undo(
             if status == "renamed" and dry_run:
                 status = "dry-run"
             results[index] = UndoResult(
-                target.entry.id, target.entry.new, target.entry.old,
-                status, outcome.message,
+                target.entry.id,
+                target.entry.new,
+                target.entry.old,
+                status,
+                outcome.message,
             )
             if status == "renamed":
                 undo_entries.append(_undo_entry(target, timestamp))
@@ -181,13 +185,15 @@ def run_undo(
             for index in renamed_indexes:
                 previous = results[index]
                 results[index] = UndoResult(
-                    previous.id, previous.old_rel, previous.new_rel,
+                    previous.id,
+                    previous.old_rel,
+                    previous.new_rel,
                     "journal-missing",
                     f"откат выполнен, журнал не записан: {exc}",
                 )
             had_errors = True
 
     ordered = tuple(results[index] for index in sorted(results))
-    return UndoReport(ordered, had_errors or any(
-        result.status == "journal-missing" for result in ordered
-    ))
+    return UndoReport(
+        ordered, had_errors or any(result.status == "journal-missing" for result in ordered)
+    )

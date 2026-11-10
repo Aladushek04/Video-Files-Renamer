@@ -1,4 +1,5 @@
 """Тесты запуска скраперов студий из TUI (без Textual и сети)."""
+
 import sys
 import threading
 import time
@@ -27,9 +28,7 @@ def test_run_captures_child_output(monkeypatch):
 def test_commands_use_module_entrypoints():
     assert "video_renamer.scrapers.stashdb" in studio_tasks._command("stashdb")
     assert "video_renamer.scrapers.fansdb" in studio_tasks._command("fansdb")
-    assert "video_renamer.scrapers.theporndb" in studio_tasks._command(
-        "theporndb"
-    )
+    assert "video_renamer.scrapers.theporndb" in studio_tasks._command("theporndb")
     merge = studio_tasks._command("merge")
     assert all(path in merge for path in studio_tasks.MERGE_INPUTS)
     assert "--apply" in merge

@@ -17,6 +17,7 @@ Windows-санитизация заменяет запрещённые симв�
 
 Зависимостей нет — только стандартная библиотека.
 """
+
 import re
 import unicodedata
 from collections.abc import Sequence
@@ -137,9 +138,7 @@ def is_valid_final_stem(stem: str) -> bool:
     return not _is_reserved(stem)
 
 
-def _scene_blocks(
-    scene: Scene, local: LocalNameInfo
-) -> tuple[str, str, tuple[str, ...], str]:
+def _scene_blocks(scene: Scene, local: LocalNameInfo) -> tuple[str, str, tuple[str, ...], str]:
     """Блоки итогового имени: студия, дата, исполнители, название."""
     studio = ""
     if scene.studio is not None and (scene.studio.name or "").strip():
@@ -158,9 +157,7 @@ def _scene_blocks(
     return studio, date, actors, title
 
 
-def build_scene_stem(
-    scene: Scene, local: LocalNameInfo, studios: dict[str, str]
-) -> str:
+def build_scene_stem(scene: Scene, local: LocalNameInfo, studios: dict[str, str]) -> str:
     """Итоговый stem из официальных полей сцены с локальными fallback-ами."""
     studio, date, actors, title = _scene_blocks(scene, local)
     return sanitize_windows_stem(build_new_name(studio, date, actors, title))
@@ -176,12 +173,8 @@ def normalize_for_match(text: str) -> str:
     if not text:
         return ""
     decomposed = unicodedata.normalize("NFKD", text)
-    without_marks = "".join(
-        char for char in decomposed if not unicodedata.combining(char)
-    )
-    spaced = "".join(
-        char.lower() if char.isalnum() else " " for char in without_marks
-    )
+    without_marks = "".join(char for char in decomposed if not unicodedata.combining(char))
+    spaced = "".join(char.lower() if char.isalnum() else " " for char in without_marks)
     return _WS.sub(" ", spaced).strip()
 
 
@@ -256,9 +249,7 @@ def _performer_signal(scene: Scene, stem_norm: str) -> tuple[float, bool]:
     return found / total, True
 
 
-def _studio_signal(
-    scene: Scene, local: LocalNameInfo, stem_norm: str
-) -> tuple[float, bool]:
+def _studio_signal(scene: Scene, local: LocalNameInfo, stem_norm: str) -> tuple[float, bool]:
     """1/0: студия сцены совпала с распознанной или встречается в stem."""
     name = ""
     if scene.studio is not None:
@@ -322,9 +313,7 @@ class ScoredScene:
     code_hit: float = 0.0
 
 
-def score_scene(
-    scene: Scene, local: LocalNameInfo, studios: dict[str, str]
-) -> ScoredScene:
+def score_scene(scene: Scene, local: LocalNameInfo, studios: dict[str, str]) -> ScoredScene:
     """Считает сходство сцены с локальным именем.
 
     `studios` принимается для единообразия с `resolve_match`; скоринг
@@ -352,11 +341,7 @@ def score_scene(
         signals.append((_WEIGHT_CODE, code_hit))
 
     total_weight = sum(weight for weight, _ in signals)
-    score = (
-        sum(weight * value for weight, value in signals) / total_weight
-        if total_weight
-        else 0.0
-    )
+    score = sum(weight * value for weight, value in signals) / total_weight if total_weight else 0.0
     return ScoredScene(
         scene=scene,
         score=score,
@@ -381,10 +366,7 @@ def pick_text_match(
         item
         for item in scored
         if item.score >= _TEXT_THRESHOLD
-        and (
-            item.performer_hit >= _PERFORMER_GUARD
-            or item.title_sim >= _TITLE_GUARD
-        )
+        and (item.performer_hit >= _PERFORMER_GUARD or item.title_sim >= _TITLE_GUARD)
     ]
     if not eligible:
         return None, False
@@ -424,10 +406,7 @@ def _other_block_count(scene: Scene) -> int:
     """
     studio = bool(scene.studio and (scene.studio.name or "").strip())
     date = _scene_date(scene) is not None
-    actors = any(
-        (performer.display_name or "").strip()
-        for performer in scene.performers
-    )
+    actors = any((performer.display_name or "").strip() for performer in scene.performers)
     return sum((studio, date, actors))
 
 
@@ -458,9 +437,7 @@ def resolve_match(
     if len(fingerprint_scenes) == 1:
         scene = fingerprint_scenes[0]
         stem = build_scene_stem(scene, local, studios)
-        if is_valid_final_stem(stem) and (
-            _has_title(scene) or _other_block_count(scene) >= 2
-        ):
+        if is_valid_final_stem(stem) and (_has_title(scene) or _other_block_count(scene) >= 2):
             return MatchResult(
                 source="fingerprint",
                 confidence=1.0,
@@ -482,10 +459,7 @@ def resolve_match(
 
     if len(fingerprint_scenes) >= 2:
         scored = sorted(
-            (
-                score_scene(scene, local, studios)
-                for scene in fingerprint_scenes
-            ),
+            (score_scene(scene, local, studios) for scene in fingerprint_scenes),
             key=lambda item: (-item.score, item.scene.id),
         )
         best = scored[0]
@@ -513,9 +487,11 @@ def resolve_match(
         if len(ordered) == 1:
             note = f"phash: {best.source} {best.id}; требует ревью"
         else:
-            note = "phash совпадения: " + ", ".join(
-                f"{scene.source} {scene.id}" for scene in ordered
-            ) + "; требует ревью"
+            note = (
+                "phash совпадения: "
+                + ", ".join(f"{scene.source} {scene.id}" for scene in ordered)
+                + "; требует ревью"
+            )
         if not is_valid_final_stem(stem):
             stem = _heuristic_stem(local, studios)
             note += "; имя сцены неполное, heuristic fallback"
@@ -545,9 +521,7 @@ def resolve_match(
             source="text",
             confidence=best.score,
             scene=best.scene,
-            candidates=tuple(
-                item.scene for item in scored_text[:_TOP_CANDIDATES]
-            ),
+            candidates=tuple(item.scene for item in scored_text[:_TOP_CANDIDATES]),
             new_stem=stem,
             note=note,
             approved=False,
@@ -557,16 +531,11 @@ def resolve_match(
     if not scored_text:
         reason = "нет текстовых кандидатов"
     elif scored_text[0].score < _TEXT_THRESHOLD:
-        reason = (
-            f"лучший score {scored_text[0].score:.2f} < "
-            f"{_TEXT_THRESHOLD:.2f}"
-        )
+        reason = f"лучший score {scored_text[0].score:.2f} < {_TEXT_THRESHOLD:.2f}"
     else:
         reason = "текстовый guard не пройден"
     if top:
-        reason += "; top: " + ", ".join(
-            f"{item.scene.id}={item.score:.2f}" for item in top
-        )
+        reason += "; top: " + ", ".join(f"{item.scene.id}={item.score:.2f}" for item in top)
     return MatchResult(
         source="heuristic",
         confidence=0.0,

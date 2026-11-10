@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Чистит мусорные имена файлов в шаблон 'Студия - ДД.ММ.ГГГГ - Актеры - Название'."""
+
 import json
 import os
 import re
@@ -76,7 +77,7 @@ def extract_date(stem: str) -> tuple:
     if m:
         yyyy, mm, dd = m.group(1), m.group(2), m.group(3)
         out = f"{dd}.{mm}.{yyyy}"
-        return _WS.sub(" ", stem[: m.start()] + " " + stem[m.end():]).strip(" -"), out
+        return _WS.sub(" ", stem[: m.start()] + " " + stem[m.end() :]).strip(" -"), out
     m = _DATE_DMY4.search(stem)
     if m:
         # Отличаем ДД.ММ.ГГГГ от ГГГГ.ММ.ДД по длине первого блока: тут первый блок 2 цифры.
@@ -88,20 +89,20 @@ def extract_date(stem: str) -> tuple:
             out = f"{yyyy}.{mm}.{dd}"  # невалидная дата, не трогаем как дату
             return stem, None
         out = f"{dd}.{mm}.{yyyy}"
-        return _WS.sub(" ", stem[: m.start()] + " " + stem[m.end():]).strip(" -"), out
+        return _WS.sub(" ", stem[: m.start()] + " " + stem[m.end() :]).strip(" -"), out
     m = _DATE_YMD2.search(stem)
     if m:
         yy, mm, dd = m.group(1), m.group(2), m.group(3)
         yyyy = f"20{yy}" if int(yy) <= 30 else f"19{yy}"
         out = f"{dd}.{mm}.{yyyy}"
-        return _WS.sub(" ", stem[: m.start()] + " " + stem[m.end():]).strip(" -"), out
+        return _WS.sub(" ", stem[: m.start()] + " " + stem[m.end() :]).strip(" -"), out
     m = _DATE_COMPACT.search(stem)
     if m:
         yy, mm, dd = m.group(1), m.group(2), m.group(3)
         if 1 <= int(mm) <= 12 and 1 <= int(dd) <= 31:
             yyyy = f"20{yy}" if int(yy) <= 30 else f"19{yy}"
             out = f"{dd}.{mm}.{yyyy}"
-            return _WS.sub(" ", stem[: m.start()] + " " + stem[m.end():]).strip(" -"), out
+            return _WS.sub(" ", stem[: m.start()] + " " + stem[m.end() :]).strip(" -"), out
     return stem, None
 
 
@@ -236,7 +237,7 @@ def split_actors_title(rest: str) -> tuple:
                 if rest_words:
                     title = " ".join(rest_words)
                     if i + 1 < len(chunks):
-                        title += " " + " ".join(chunks[i + 1:])
+                        title += " " + " ".join(chunks[i + 1 :])
                     break
             else:
                 title = " ".join(chunks[i:])
@@ -246,7 +247,11 @@ def split_actors_title(rest: str) -> tuple:
     words = s.split(" ")
     if len(words) == 2 and all(_looks_like_name(w) for w in words):
         return [_title_case(s)], ""
-    if len(words) == 3 and all(_looks_like_name(w) for w in words) and words[1].lower() in _PARTICLES:
+    if (
+        len(words) == 3
+        and all(_looks_like_name(w) for w in words)
+        and words[1].lower() in _PARTICLES
+    ):
         return [_title_case(s)], ""
     if len(words) >= 4 and _looks_like_name(words[0]) and _looks_like_name(words[1]):
         if words[1].lower() in _ARTICLES:

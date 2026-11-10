@@ -1,4 +1,5 @@
 """Минимальный stdlib-загрузчик `.env` без внешних зависимостей."""
+
 from __future__ import annotations
 
 import os
@@ -39,8 +40,7 @@ def load_env_file(
     разобранные пары.
     """
     env = os.environ if environ is None else environ
-    target = next((candidate for candidate in _candidate_paths(path)
-                   if candidate.is_file()), None)
+    target = next((candidate for candidate in _candidate_paths(path) if candidate.is_file()), None)
     if target is None:
         return {}
 

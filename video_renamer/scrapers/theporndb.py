@@ -8,6 +8,7 @@ seed-файлов (по умолчанию `studios.json`), спрашивает
 
 Без `--apply` — dry-run: сеть читается, файлы не пишутся.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -171,7 +172,7 @@ def run_lookup(
     while batch * batch_size < total:
         if max_batches is not None and fetched >= max_batches:
             break
-        chunk = unique_names[batch * batch_size:(batch + 1) * batch_size]
+        chunk = unique_names[batch * batch_size : (batch + 1) * batch_size]
         if not chunk:
             break
         query, variables = build_lookup_query(chunk)
@@ -249,44 +250,58 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m video_renamer.scrapers.theporndb",
         description=(
-            "Enrich known studio names via ThePornDB findStudio "
-            "(ThePornDB has no queryStudios)."
+            "Enrich known studio names via ThePornDB findStudio (ThePornDB has no queryStudios)."
         ),
     )
     parser.add_argument(
-        "--seed", action="append", default=None,
+        "--seed",
+        action="append",
+        default=None,
         help="JSON file with studio names (dict values or list); repeatable "
-             "(default: studios.json)",
+        "(default: studios.json)",
     )
     parser.add_argument(
-        "--out", default=THEPORNDB_SOURCE.default_out,
-        help=f"studios JSON to merge into "
-             f"(default: {THEPORNDB_SOURCE.default_out})",
+        "--out",
+        default=THEPORNDB_SOURCE.default_out,
+        help=f"studios JSON to merge into (default: {THEPORNDB_SOURCE.default_out})",
     )
     parser.add_argument(
-        "--checkpoint", default=THEPORNDB_SOURCE.default_checkpoint,
-        help=f"checkpoint JSON "
-             f"(default: {THEPORNDB_SOURCE.default_checkpoint})",
+        "--checkpoint",
+        default=THEPORNDB_SOURCE.default_checkpoint,
+        help=f"checkpoint JSON (default: {THEPORNDB_SOURCE.default_checkpoint})",
     )
     parser.add_argument(
-        "--raw", default=THEPORNDB_SOURCE.default_raw,
-        help=f"raw found studios "
-             f"(default: {THEPORNDB_SOURCE.default_raw})",
+        "--raw",
+        default=THEPORNDB_SOURCE.default_raw,
+        help=f"raw found studios (default: {THEPORNDB_SOURCE.default_raw})",
     )
-    parser.add_argument("--batch-size", type=_positive_int,
-                        default=DEFAULT_BATCH_SIZE,
-                        help=f"names per request (default: {DEFAULT_BATCH_SIZE})")
-    parser.add_argument("--delay", type=_non_negative_float,
-                        default=DEFAULT_DELAY,
-                        help=f"seconds before each request (default: {DEFAULT_DELAY})")
-    parser.add_argument("--max-batches", type=_positive_int, default=None,
-                        help="stop after N batches (incomplete checkpoint)")
-    parser.add_argument("--apply", action="store_true",
-                        help="write progress, studios JSON and collision report")
-    parser.add_argument("--reset", action="store_true",
-                        help="ignore and (with --apply) delete checkpoint/raw")
-    parser.add_argument("--no-filter", action="store_true",
-                        help="keep generated/placeholder studio names too")
+    parser.add_argument(
+        "--batch-size",
+        type=_positive_int,
+        default=DEFAULT_BATCH_SIZE,
+        help=f"names per request (default: {DEFAULT_BATCH_SIZE})",
+    )
+    parser.add_argument(
+        "--delay",
+        type=_non_negative_float,
+        default=DEFAULT_DELAY,
+        help=f"seconds before each request (default: {DEFAULT_DELAY})",
+    )
+    parser.add_argument(
+        "--max-batches",
+        type=_positive_int,
+        default=None,
+        help="stop after N batches (incomplete checkpoint)",
+    )
+    parser.add_argument(
+        "--apply", action="store_true", help="write progress, studios JSON and collision report"
+    )
+    parser.add_argument(
+        "--reset", action="store_true", help="ignore and (with --apply) delete checkpoint/raw"
+    )
+    parser.add_argument(
+        "--no-filter", action="store_true", help="keep generated/placeholder studio names too"
+    )
     return parser
 
 
@@ -298,8 +313,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     api_key = os.environ.get(THEPORNDB_SOURCE.api_key_env, "").strip()
     if not api_key:
         print(
-            f"error: {THEPORNDB_SOURCE.api_key_env} is not set "
-            "(checked environment and .env)",
+            f"error: {THEPORNDB_SOURCE.api_key_env} is not set (checked environment and .env)",
             file=sys.stderr,
         )
         return 2
@@ -319,8 +333,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         checkpoint = None if args.reset else load_lookup_checkpoint(args.checkpoint)
     except (OSError, ValueError) as exc:
         print(
-            f"error: cannot read checkpoint {args.checkpoint}: {exc}; "
-            f"use --reset to start over",
+            f"error: cannot read checkpoint {args.checkpoint}: {exc}; use --reset to start over",
             file=sys.stderr,
         )
         return 2
@@ -351,8 +364,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             initial = load_raw(args.raw)
         except (OSError, ValueError) as exc:
             print(
-                f"error: cannot read raw studios {args.raw}: {exc}; "
-                f"use --reset to start over",
+                f"error: cannot read raw studios {args.raw}: {exc}; use --reset to start over",
                 file=sys.stderr,
             )
             return 2
@@ -395,9 +407,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"{len(accumulated)} collected"
             )
 
-        client = StashDBClient(
-            api_key, endpoint=THEPORNDB_SOURCE.endpoint, delay=args.delay
-        )
+        client = StashDBClient(api_key, endpoint=THEPORNDB_SOURCE.endpoint, delay=args.delay)
         try:
             report = run_lookup(
                 client,

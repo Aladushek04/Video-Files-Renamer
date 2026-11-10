@@ -15,7 +15,11 @@ from video_renamer.scrapers.stashdb import (
 
 def scene(scene_id, title, date=None, studio=None, source="StashDB"):
     return Scene(
-        id=scene_id, title=title, release_date=date, date=None, code=None,
+        id=scene_id,
+        title=title,
+        release_date=date,
+        date=None,
+        code=None,
         duration=None,
         studio=Studio(id="st", name=studio) if studio else None,
         source=source,
@@ -49,7 +53,8 @@ def test_missing_secondary_key_is_skipped():
 
 def test_secondary_clients_built_when_keys_present():
     clients = build_fingerprint_clients(
-        {"THE_PORNDB_API_KEY": "t", "FANSDB_API_KEY": "f"}, offline=False)
+        {"THE_PORNDB_API_KEY": "t", "FANSDB_API_KEY": "f"}, offline=False
+    )
     assert set(clients) == {"ThePornDB", "FansDB"}
 
 
@@ -59,9 +64,13 @@ def test_offline_keeps_clients_so_cache_can_be_read():
 
 
 def test_missing_secondary_keys_are_listed_with_env_names():
-    missing = missing_secondary_keys({
-        "STASHDB_API_KEY": "s", "THE_PORNDB_API_KEY": "", "FANSDB_API_KEY": "f",
-    })
+    missing = missing_secondary_keys(
+        {
+            "STASHDB_API_KEY": "s",
+            "THE_PORNDB_API_KEY": "",
+            "FANSDB_API_KEY": "f",
+        }
+    )
     assert [(source.name, source.api_key_env) for source in missing] == [
         ("ThePornDB", "THE_PORNDB_API_KEY"),
     ]
@@ -69,16 +78,17 @@ def test_missing_secondary_keys_are_listed_with_env_names():
 
 def test_merge_scenes_collapses_duplicates_across_sources():
     stash = [scene("a", "Same Title", "2026-01-02", "Studio X")]
-    porn = [scene("b", "Same  Title!", "2026-01-02", "studio x",
-                  source="ThePornDB")]
+    porn = [scene("b", "Same  Title!", "2026-01-02", "studio x", source="ThePornDB")]
     assert [s.id for s in merge_scenes([stash, porn])] == ["a"]
 
 
 def test_merge_scenes_keeps_distinct_scenes():
-    merged = merge_scenes([
-        [scene("a", "One", "2026-01-02", "S")],
-        [scene("b", "Two", "2026-01-02", "S", source="ThePornDB")],
-    ])
+    merged = merge_scenes(
+        [
+            [scene("a", "One", "2026-01-02", "S")],
+            [scene("b", "Two", "2026-01-02", "S", source="ThePornDB")],
+        ]
+    )
     assert [s.id for s in merged] == ["a", "b"]
 
 
@@ -88,17 +98,21 @@ def test_merge_scenes_handles_missing_fields():
 
 
 def test_merge_scenes_never_collapses_scenes_without_title():
-    merged = merge_scenes([
-        [scene("a", None, "2026-01-02", "S")],
-        [scene("b", "", "2026-01-02", "S", source="ThePornDB")],
-    ])
+    merged = merge_scenes(
+        [
+            [scene("a", None, "2026-01-02", "S")],
+            [scene("b", "", "2026-01-02", "S", source="ThePornDB")],
+        ]
+    )
     assert [s.id for s in merged] == ["a", "b"]
 
 
 def test_merge_scenes_keeps_first_source_order():
-    merged = merge_scenes([
-        [scene("a", "One", "2026-01-02")],
-        [scene("b", "Two", "2026-01-02", source="ThePornDB")],
-        [scene("c", "Three", "2026-01-02", source="FansDB")],
-    ])
+    merged = merge_scenes(
+        [
+            [scene("a", "One", "2026-01-02")],
+            [scene("b", "Two", "2026-01-02", source="ThePornDB")],
+            [scene("c", "Three", "2026-01-02", source="FansDB")],
+        ]
+    )
     assert [s.id for s in merged] == ["a", "b", "c"]

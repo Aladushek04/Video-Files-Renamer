@@ -4,6 +4,7 @@
 Первый встреченный вариант имени побеждает; альтернативные написания
 попадают в отчёт коллизий. Без `--apply` — dry-run.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -92,10 +93,10 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Merge studio JSON dictionaries, first value wins.",
     )
     parser.add_argument("inputs", nargs="+", help="studio JSON files to merge")
-    parser.add_argument("--out", default="data/studios.json",
-                        help="output JSON (default: data/studios.json)")
-    parser.add_argument("--apply", action="store_true",
-                        help="write output and collision report")
+    parser.add_argument(
+        "--out", default="data/studios.json", help="output JSON (default: data/studios.json)"
+    )
+    parser.add_argument("--apply", action="store_true", help="write output and collision report")
     return parser
 
 
@@ -108,13 +109,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     action = "written" if args.apply else "dry-run"
-    print(
-        f"{action}: {report['merged_keys']} key(s), "
-        f"{report['collisions']} collision(s)"
-    )
+    print(f"{action}: {report['merged_keys']} key(s), {report['collisions']} collision(s)")
     if not args.apply:
-        print(f"add --apply to write {args.out} and "
-              f"{_collisions_path(args.out)}")
+        print(f"add --apply to write {args.out} and {_collisions_path(args.out)}")
     return 0
 
 
