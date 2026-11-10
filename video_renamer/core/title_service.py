@@ -36,6 +36,7 @@ from video_renamer.core.fingerprint_sources import (
     merge_scenes,
 )
 from video_renamer.core.oshash import OshashError, oshash_from_path
+from video_renamer.core.performer_names import PerformerIndex
 from video_renamer.core.phash import PhashError, format_phash, phash_from_path
 from video_renamer.core.stashdb_client import (
     Scene,
@@ -312,6 +313,7 @@ class TitleService:
         phash_func: Callable[[str], str] | None = None,
         ffmpeg: str = "ffmpeg",
         ffprobe: str = "ffprobe",
+        performers: PerformerIndex | None = None,
     ) -> None:
         self._root = os.path.abspath(os.fspath(root))
         self._studios = dict(studios)
@@ -329,6 +331,7 @@ class TitleService:
         self._ffmpeg = ffmpeg
         self._ffprobe = ffprobe
         self._phash_func = phash_func or self._default_phash
+        self._performers = performers
 
     def _default_phash(self, path: str) -> str:
         return format_phash(phash_from_path(path, ffmpeg=self._ffmpeg, ffprobe=self._ffprobe))
@@ -353,7 +356,7 @@ class TitleService:
         Выбранный вручную кандидат сразу одобряется — человек уже сделал выбор.
         """
         suffix = os.path.splitext(row.old_rel)[1]
-        local = parse_local_name(row.old_rel, self._studios)
+        local = parse_local_name(row.old_rel, self._studios, self._performers)
         stem = build_scene_stem(scene, local, self._studios)
         name = _cap_length(stem, suffix)
         final_stem = self._stem(name, suffix)
@@ -763,7 +766,7 @@ class TitleService:
                     parent=os.path.dirname(rel),
                     name=name,
                     suffix=suffix,
-                    local=parse_local_name(name, self._studios),
+                    local=parse_local_name(name, self._studios, self._performers),
                     oshash=digest,
                     size=size,
                     hash_error=hash_error,
@@ -968,7 +971,7 @@ class TitleService:
             for candidate in candidates:
                 if candidate.fingerprint_scenes or candidate.phash_scenes:
                     continue
-                term = normalize_for_match(candidate.local.rest)
+                term = normalize_for_match(candidate.local.search_text)
                 if term:
                     pending.append((candidate, term))
 

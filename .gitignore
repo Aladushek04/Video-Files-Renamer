@@ -39,6 +39,9 @@ studios_fansdb.json
 studios_theporndb.json
 *.bak
 
+# --- Справочник имён исполнителей (генерируется scrape-performers) ---
+data/performers*.json
+
 # --- Секреты (ключи из переменной окружения или .env) ---
 .env
 .env.*

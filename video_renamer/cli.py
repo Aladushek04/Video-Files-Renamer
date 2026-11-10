@@ -28,6 +28,7 @@ from video_renamer.core.fingerprint_sources import (
     build_fingerprint_clients,
     missing_secondary_keys,
 )
+from video_renamer.core.performer_names import PerformerIndex
 from video_renamer.core.phash import PhashToolError, check_phash_tools
 from video_renamer.core.rename_log import (
     ACTION_RENAME,
@@ -49,7 +50,13 @@ from video_renamer.core.stashdb_client import (
 from video_renamer.core.title_cache import TitleCache
 from video_renamer.core.title_service import ApplyResult, PreviewRow, TitleService
 from video_renamer.core.undo import run_undo, select_for_undo
-from video_renamer.paths import CACHE_PATH, LOG_PATH, STUDIOS_PATH, load_project_env
+from video_renamer.paths import (
+    CACHE_PATH,
+    LOG_PATH,
+    PERFORMERS_INDEX_PATH,
+    STUDIOS_PATH,
+    load_project_env,
+)
 
 __all__ = [
     "append_rename_log",
@@ -74,6 +81,7 @@ _APPROVED_VALUES = frozenset({"y", "yes", "1", "true"})
 DEFAULT_CSV = "preview.csv"
 DEFAULT_LOG = str(LOG_PATH)
 DEFAULT_STUDIOS = str(STUDIOS_PATH)
+DEFAULT_PERFORMERS_INDEX = str(PERFORMERS_INDEX_PATH)
 DEFAULT_CACHE = str(CACHE_PATH)
 
 
@@ -228,6 +236,14 @@ def _build_parser() -> argparse.ArgumentParser:
     preview.add_argument(
         "--studios", default=DEFAULT_STUDIOS, help="studios JSON (default: studios.json)"
     )
+    preview.add_argument(
+        "--names",
+        default=DEFAULT_PERFORMERS_INDEX,
+        help="performer names index (default: performers_index.json)",
+    )
+    preview.add_argument(
+        "--no-names", action="store_true", help="disable the local performer-name index"
+    )
     preview.add_argument("--cache", default=DEFAULT_CACHE, help="SQLite cache path")
     preview.add_argument(
         "--phash", action="store_true", help="also search by PHASH (runs ffmpeg per file; slow)"
@@ -293,6 +309,17 @@ def _load_studios(path: str) -> dict[str, str] | None:
         return None
 
 
+def _load_performers(path: str) -> PerformerIndex | None:
+    """Читает индекс имён; отсутствие файла — штатное отключение справочника."""
+    if not os.path.exists(path):
+        return None
+    try:
+        return PerformerIndex.load(path)
+    except (OSError, ValueError, TypeError) as exc:
+        print(f"warning: cannot read performer index {path}: {exc}", file=sys.stderr)
+        return None
+
+
 def _run_preview(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     """Выполняет preview и пишет CSV; файлы не изменяются."""
     if args.refresh and args.offline:
@@ -324,6 +351,7 @@ def _run_preview(args: argparse.Namespace, parser: argparse.ArgumentParser) -> i
     studios = _load_studios(args.studios)
     if studios is None:
         return 2
+    performers = None if args.no_names else _load_performers(args.names)
 
     try:
         cache = TitleCache(args.cache)
@@ -354,6 +382,7 @@ def _run_preview(args: argparse.Namespace, parser: argparse.ArgumentParser) -> i
             phash=args.phash,
             ffmpeg=ffmpeg,
             ffprobe=ffprobe,
+            performers=performers,
         ).preview()
     except StashDBAuthError as exc:
         print(

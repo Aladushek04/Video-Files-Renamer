@@ -35,6 +35,7 @@ dev = ["pytest>=8", "ruff>=0.17"]
 video-renamer = "video_renamer.cli:main"
 video-renamer-tui = "video_renamer.ui.tui:main"
 scrape-stashdb = "video_renamer.scrapers.stashdb:main"
+scrape-performers = "video_renamer.scrapers.performers:main"
 scrape-fansdb = "video_renamer.scrapers.fansdb:main"
 scrape-theporndb = "video_renamer.scrapers.theporndb:main"
 merge-studios = "video_renamer.scrapers.merge_studios:main"

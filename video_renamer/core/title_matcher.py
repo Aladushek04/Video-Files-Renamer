@@ -19,7 +19,6 @@ Windows-санитизация заменяет запрещённые симв�
 """
 
 import re
-import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -28,9 +27,12 @@ from video_renamer.core.clean_ph_names import (
     build_new_name,
     clean_stem,
     prepare_stem,
+    prepare_stem_with_names,
+    split_actors_title,
     split_name,
 )
 from video_renamer.core.stashdb_client import Scene
+from video_renamer.core.text_norm import normalize_for_match
 
 __all__ = [
     "LocalNameInfo",
@@ -79,20 +81,41 @@ class LocalNameInfo:
     """Разобранное локальное имя.
 
     `stem` — имя без расширения, `date` — дата в `ДД.ММ.ГГГГ`, `studio` —
-    распознанная студия, `rest` — очищенный остаток без даты и студии.
+    распознанная студия, `rest` — очищенный остаток без даты, студии и
+    известных имён исполнителей. `known_actors` — канонические имена,
+    найденные в справочнике.
     """
 
     stem: str
     date: str | None
     studio: str | None
     rest: str
+    known_actors: tuple[str, ...] = ()
+
+    @property
+    def search_text(self) -> str:
+        """Текст для поиска: имена из справочника и остаток без них."""
+        return " ".join((*self.known_actors, self.rest)).strip()
 
 
-def parse_local_name(filename: str, studios: dict[str, str]) -> LocalNameInfo:
-    """Разбирает имя файла: stem без расширения, дата, студия и остаток."""
+def parse_local_name(filename: str, studios: dict[str, str], performers=None) -> LocalNameInfo:
+    """Разбирает имя файла: stem без расширения, дата, студия и остаток.
+
+    Если передан справочник имён, известные имена вырезаются до определения
+    студии и попадают в `known_actors`.
+    """
     stem, _ = split_name(filename)
-    rest, date, studio = prepare_stem(stem, studios)
-    return LocalNameInfo(stem=stem, date=date, studio=studio, rest=rest)
+    if performers is None:
+        rest, date, studio = prepare_stem(stem, studios)
+        return LocalNameInfo(stem=stem, date=date, studio=studio, rest=rest)
+    rest, date, studio, known_actors = prepare_stem_with_names(stem, studios, performers)
+    return LocalNameInfo(
+        stem=stem,
+        date=date,
+        studio=studio,
+        rest=rest,
+        known_actors=tuple(known_actors),
+    )
 
 
 def format_scene_date(value: str | None) -> str | None:
@@ -165,17 +188,10 @@ def build_scene_stem(scene: Scene, local: LocalNameInfo, studios: dict[str, str]
 
 def build_heuristic_stem(local: LocalNameInfo, studios: dict[str, str]) -> str:
     """Эвристический stem из локального имени (старый конвейер)."""
+    if local.known_actors:
+        actors, title = split_actors_title(local.rest, local.known_actors)
+        return sanitize_windows_stem(build_new_name(local.studio, local.date, actors, title))
     return sanitize_windows_stem(clean_stem(local.stem, studios))
-
-
-def normalize_for_match(text: str) -> str:
-    """Нормализует строку для сравнения: NFKD, без диакритики, lower, пробелы."""
-    if not text:
-        return ""
-    decomposed = unicodedata.normalize("NFKD", text)
-    without_marks = "".join(char for char in decomposed if not unicodedata.combining(char))
-    spaced = "".join(char.lower() if char.isalnum() else " " for char in without_marks)
-    return _WS.sub(" ", spaced).strip()
 
 
 def _jaccard(left: str, right: str) -> float:

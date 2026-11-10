@@ -1,6 +1,7 @@
 import pytest
 
 from video_renamer.core.clean_ph_names import clean_stem
+from video_renamer.core.performer_names import PerformerIndex, build_index
 from video_renamer.core.stashdb_client import Performer, Scene, Studio
 from video_renamer.core.title_matcher import (
     LocalNameInfo,
@@ -168,6 +169,67 @@ def test_build_heuristic_stem_matches_clean_stem():
     expected = clean_stem(local.stem, studios)
     assert expected == "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory"
     assert build_heuristic_stem(local, studios) == expected
+
+
+def names_index(*names):
+    return PerformerIndex.from_index(
+        build_index({"id": f"id-{name}", "name": name, "aliases": []} for name in names)
+    )
+
+
+def test_known_name_wins_over_studio_prefix():
+    studios = {"veronica": "VERONICA"}
+    name = "veronica-leal-xxxx-i-tested-some-new-dicks-mixed-with-a-pro-one-s42250-v32878.mp4"
+    local = parse_local_name(name, studios, names_index("Veronica Leal"))
+
+    assert local.studio is None
+    assert local.known_actors == ("Veronica Leal",)
+    assert local.rest == "xxxx i tested some new dicks mixed with a pro one s42250 v32878"
+    assert local.search_text == "Veronica Leal " + local.rest
+    assert build_heuristic_stem(local, studios) == (
+        "Veronica Leal - Xxxx I Tested Some New Dicks Mixed With A Pro One S42250 V32878"
+    )
+
+
+def test_without_names_studio_consumes_first_name_word():
+    name = "veronica-leal-xxxx-i-tested-some-new-dicks-mixed-with-a-pro-one-s42250-v32878.mp4"
+    local = parse_local_name(name, {"veronica": "VERONICA"})
+
+    assert local.studio == "VERONICA"
+    assert local.known_actors == ()
+    assert local.rest.startswith("leal xxxx")
+
+
+def test_known_name_keeps_real_studio_and_date():
+    studios = {"vrbangers": "Vrbangers"}
+    local = parse_local_name(
+        "Vrbangers - 22.12.2025 - Gabbie Carter - Title.mp4",
+        studios,
+        names_index("Gabbie Carter"),
+    )
+
+    assert local.studio == "Vrbangers"
+    assert local.date == "22.12.2025"
+    assert local.known_actors == ("Gabbie Carter",)
+    assert "title" in local.rest.lower()
+
+
+def test_known_names_are_removed_from_title_similarity():
+    local = parse_local_name(
+        "Yasmina Khan - Finally Got His Hands On Me.mp4", {}, names_index("Yasmina Khan")
+    )
+    candidate = Scene(
+        "s1",
+        "Finally Got His Hands On Me",
+        None,
+        None,
+        None,
+        None,
+        None,
+        (Performer("p1", "Manuel Ferrara"),),
+    )
+    scored = score_scene(candidate, local, {})
+    assert scored.title_sim == 1.0
 
 
 # --- scoring, text selection and resolution ---------------------------------
