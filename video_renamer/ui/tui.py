@@ -40,6 +40,7 @@ from textual.widgets.option_list import Option
 from video_renamer.cli import append_rename_log
 from video_renamer.core.clean_ph_names import load_studios
 from video_renamer.core.fingerprint_sources import build_fingerprint_clients
+from video_renamer.core.performer_names import PerformerIndex
 from video_renamer.core.rename_log import (
     active_renames,
     format_log_timestamp,
@@ -59,6 +60,7 @@ from video_renamer.core.undo import run_undo, select_for_undo
 from video_renamer.paths import (
     CACHE_PATH,
     LOG_PATH,
+    PERFORMERS_INDEX_PATH,
     STUDIOS_PATH,
     load_project_env,
 )
@@ -1035,8 +1037,24 @@ class RenamerApp(App[None]):
             return self._service
         studios_path = STUDIOS_PATH
         studios = load_studios(str(studios_path)) if studios_path.exists() else {}
-        self._service = TitleService(self.model.folder, studios, None, None)
+        self._service = TitleService(
+            self.model.folder,
+            studios,
+            None,
+            None,
+            performers=self._load_performers(),
+        )
         return self._service
+
+    @staticmethod
+    def _load_performers() -> PerformerIndex | None:
+        """Индекс имён, если он собран; иначе разбор без справочника."""
+        if not PERFORMERS_INDEX_PATH.exists():
+            return None
+        try:
+            return PerformerIndex.load(str(PERFORMERS_INDEX_PATH))
+        except (OSError, ValueError, TypeError):
+            return None
 
     def invalidate_services(self) -> None:
         """Сбрасывает справочник после обновления студий."""
@@ -1130,6 +1148,7 @@ class RenamerApp(App[None]):
                 offline=not bool(self.key),
                 progress=progress,
                 extra_clients=build_fingerprint_clients(os.environ, offline=not bool(self.key)),
+                performers=self._load_performers(),
             )
             self._service = service
             return service.preview()

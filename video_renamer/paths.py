@@ -14,6 +14,8 @@ from video_renamer.core.env_file import load_env_file
 __all__ = [
     "CACHE_PATH",
     "LOG_PATH",
+    "PERFORMERS_INDEX_PATH",
+    "PERFORMERS_PATH",
     "PROJECT_ROOT",
     "STUDIOS_PATH",
     "load_project_env",
@@ -21,6 +23,8 @@ __all__ = [
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STUDIOS_PATH = PROJECT_ROOT / "data" / "studios.json"
+PERFORMERS_PATH = PROJECT_ROOT / "data" / "performers.json"
+PERFORMERS_INDEX_PATH = PROJECT_ROOT / "data" / "performers_index.json"
 CACHE_PATH = PROJECT_ROOT / "cache" / "title_fixer.sqlite3"
 LOG_PATH = PROJECT_ROOT / "rename_log.csv"
 

@@ -137,10 +137,12 @@ def split_camel(s: str) -> str:
     return _CAMEL.sub(" ", s)
 
 
-def prepare_stem(stem: str, studios: dict) -> tuple:
-    """Готовит stem: вырезает дату, техмусор и студию, разбивает camelCase.
+def _prepare_stem(stem: str, studios: dict, performers=None) -> tuple:
+    """Общий конвейер `prepare_stem`: дата, техмусор, имена, студия.
 
-    Возвращает (остаток, дата ДД.ММ.ГГГГ или None, студия или None).
+    Имена вырезаются до `extract_studio`, иначе первое слово имени может
+    совпасть с названием студии (`VERONICA` у `Veronica Leal`) и имя
+    развалится. Без `performers` поведение прежнее.
     """
     s, date = extract_date(stem)
     s = strip_tech_junk(s)
@@ -149,10 +151,31 @@ def prepare_stem(stem: str, studios: dict) -> tuple:
     s = _EMPTY_PAREN.sub(" ", s)
     s = _EPORNER.sub("", s).strip()
     s = _WS.sub(" ", s).strip(" -")
-    studio, s = extract_studio(s, studios)
     s = split_camel(s)
+    known_actors = ()
+    if performers is not None:
+        s, known_actors = performers.strip_names(s)
+        s = _WS.sub(" ", s).strip(" -")
+    studio, s = extract_studio(s, studios)
     s = _WS.sub(" ", s).strip(" -")
-    return s, date, studio
+    return s, date, studio, known_actors
+
+
+def prepare_stem(stem: str, studios: dict) -> tuple:
+    """Готовит stem: вырезает дату, техмусор и студию, разбивает camelCase.
+
+    Возвращает (остаток, дата ДД.ММ.ГГГГ или None, студия или None).
+    """
+    rest, date, studio, _ = _prepare_stem(stem, studios)
+    return rest, date, studio
+
+
+def prepare_stem_with_names(stem: str, studios: dict, performers) -> tuple:
+    """То же, что `prepare_stem`, но вырезает и известные имена.
+
+    Возвращает (остаток, дата, студия, канонические имена исполнителей).
+    """
+    return _prepare_stem(stem, studios, performers)
 
 
 def _title_case(text: str) -> str:
@@ -191,9 +214,15 @@ def _actor_len(words: list) -> int:
     return 2
 
 
-def split_actors_title(rest: str) -> tuple:
-    """Делит остаток на (актеры, название). Актеры — ведущие пары Имя Фамилия."""
+def split_actors_title(rest: str, known_actors=()) -> tuple:
+    """Делит остаток на (актеры, название).
+
+    Если переданы `known_actors` из справочника имён, они и есть актёры,
+    а весь остаток — название. Иначе работают старые эвристики.
+    """
     s = _WS.sub(" ", rest).strip(" -,")
+    if known_actors:
+        return list(known_actors), _title_case(s)
     if not s:
         return [], ""
     if " - " in s:
@@ -275,10 +304,14 @@ def build_new_name(studio, date, actors, title) -> str:
     return " - ".join(parts)
 
 
-def clean_stem(stem: str, studios: dict) -> str:
+def clean_stem(stem: str, studios: dict, performers=None) -> str:
     """Полный конвейер для stem без расширения."""
-    s, date, studio = prepare_stem(stem, studios)
-    actors, title = split_actors_title(s)
+    if performers is None:
+        s, date, studio = prepare_stem(stem, studios)
+        known_actors = ()
+    else:
+        s, date, studio, known_actors = prepare_stem_with_names(stem, studios, performers)
+    actors, title = split_actors_title(s, known_actors)
     return build_new_name(studio, date, actors, title)
 
 
