@@ -1,4 +1,5 @@
 """Тесты модели TUI без зависимости от Textual."""
+
 from video_renamer.core.title_service import PreviewRow
 from video_renamer.ui.tui_model import ReviewModel
 
@@ -8,12 +9,15 @@ def row(source="text", approved=False, old="old.mp4", new="new.mp4"):
 
 
 def test_filter_and_toggle():
-    model = ReviewModel("D:/Videos", [
-        row("fingerprint", True),
-        row("text", False),
-        row("heuristic", False),
-        row("unchanged", False),
-    ])
+    model = ReviewModel(
+        "D:/Videos",
+        [
+            row("fingerprint", True),
+            row("text", False),
+            row("heuristic", False),
+            row("unchanged", False),
+        ],
+    )
     assert len(model.visible()) == 4
     model.filter = "pending"
     assert [item.source for _, item in model.visible()] == ["text", "heuristic"]
@@ -51,12 +55,15 @@ def test_stats_counts_phash_rows_as_pending():
 
 
 def test_stats_counts_sources_and_approvals():
-    model = ReviewModel("D:/Videos", [
-        row("fingerprint", True),
-        row("text", False),
-        row("heuristic", False),
-        row("unchanged", False),
-    ])
+    model = ReviewModel(
+        "D:/Videos",
+        [
+            row("fingerprint", True),
+            row("text", False),
+            row("heuristic", False),
+            row("unchanged", False),
+        ],
+    )
     assert model.stats() == {
         "total": 4,
         "approved": 1,

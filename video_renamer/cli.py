@@ -15,6 +15,7 @@ CSV-ревью, печать и коды возврата, а вся логик�
 пишет `rename_log.csv` только для фактически переименованных строк при
 явном `--apply`.
 """
+
 import argparse
 import csv
 import os
@@ -58,8 +59,15 @@ __all__ = [
 ]
 
 CSV_FIELDS = (
-    "approved", "old", "new", "source", "confidence",
-    "scene_id", "note", "oshash", "size",
+    "approved",
+    "old",
+    "new",
+    "source",
+    "confidence",
+    "scene_id",
+    "note",
+    "oshash",
+    "size",
 )
 _APPROVED_VALUES = frozenset({"y", "yes", "1", "true"})
 
@@ -106,17 +114,19 @@ def write_preview_csv(path: str, rows: Sequence[PreviewRow]) -> None:
         writer = csv.writer(handle, delimiter=";")
         writer.writerow(CSV_FIELDS)
         for row in rows:
-            writer.writerow((
-                "y" if row.approved else "n",
-                _guard_formula(row.old_rel),
-                _guard_formula(row.new_rel),
-                row.source,
-                str(row.confidence),
-                row.scene_id,
-                _guard_formula(row.note),
-                row.oshash,
-                "" if row.size is None else str(row.size),
-            ))
+            writer.writerow(
+                (
+                    "y" if row.approved else "n",
+                    _guard_formula(row.old_rel),
+                    _guard_formula(row.new_rel),
+                    row.source,
+                    str(row.confidence),
+                    row.scene_id,
+                    _guard_formula(row.note),
+                    row.oshash,
+                    "" if row.size is None else str(row.size),
+                )
+            )
 
 
 def read_preview_csv(path: str) -> list[PreviewRow]:
@@ -126,27 +136,25 @@ def read_preview_csv(path: str) -> list[PreviewRow]:
         fields = reader.fieldnames or []
         missing = [name for name in CSV_FIELDS if name not in fields]
         if missing:
-            raise ValueError(
-                "CSV is missing columns: " + ", ".join(missing)
-            )
+            raise ValueError("CSV is missing columns: " + ", ".join(missing))
 
         rows: list[PreviewRow] = []
         for record in reader:
-            if not any(
-                (record.get(name) or "").strip() for name in CSV_FIELDS
-            ):
+            if not any((record.get(name) or "").strip() for name in CSV_FIELDS):
                 continue
-            rows.append(PreviewRow(
-                approved=_parse_approved(record.get("approved")),
-                old_rel=_unguard_formula(record.get("old") or ""),
-                new_rel=_unguard_formula(record.get("new") or ""),
-                source=record.get("source") or "",
-                confidence=_parse_float(record.get("confidence")),
-                scene_id=record.get("scene_id") or "",
-                note=_unguard_formula(record.get("note") or ""),
-                oshash=record.get("oshash") or "",
-                size=_parse_int(record.get("size")),
-            ))
+            rows.append(
+                PreviewRow(
+                    approved=_parse_approved(record.get("approved")),
+                    old_rel=_unguard_formula(record.get("old") or ""),
+                    new_rel=_unguard_formula(record.get("new") or ""),
+                    source=record.get("source") or "",
+                    confidence=_parse_float(record.get("confidence")),
+                    scene_id=record.get("scene_id") or "",
+                    note=_unguard_formula(record.get("note") or ""),
+                    oshash=record.get("oshash") or "",
+                    size=_parse_int(record.get("size")),
+                )
+            )
     return rows
 
 
@@ -174,19 +182,21 @@ def append_rename_log(
     entries = []
     for result in renamed:
         row = by_old.get(result.old_rel)
-        entries.append(LogEntry(
-            timestamp=timestamp,
-            action=ACTION_RENAME,
-            undoes="",
-            root=abs_root,
-            old=result.old_rel,
-            new=result.new_rel,
-            oshash=row.oshash if row is not None else "",
-            size=row.size if row is not None else None,
-            scene_id=row.scene_id if row is not None else "",
-            source=row.source if row is not None else "",
-            legacy=False,
-        ))
+        entries.append(
+            LogEntry(
+                timestamp=timestamp,
+                action=ACTION_RENAME,
+                undoes="",
+                root=abs_root,
+                old=result.old_rel,
+                new=result.new_rel,
+                oshash=row.oshash if row is not None else "",
+                size=row.size if row is not None else None,
+                scene_id=row.scene_id if row is not None else "",
+                source=row.source if row is not None else "",
+                legacy=False,
+            )
+        )
     append_log(path, entries)
 
 
@@ -203,67 +213,66 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    preview = subparsers.add_parser(
-        "preview", help="scan a folder and write preview.csv"
-    )
+    preview = subparsers.add_parser("preview", help="scan a folder and write preview.csv")
     preview.add_argument("directory", help="folder with video files")
-    preview.add_argument("--csv", default=DEFAULT_CSV,
-                         help="preview CSV path (default: preview.csv)")
-    preview.add_argument("--recursive", action="store_true",
-                         help="scan subfolders")
-    preview.add_argument("--limit", type=int, default=None,
-                         help="process only the first N files")
-    preview.add_argument("--no-text", action="store_true",
-                         help="disable StashDB text search")
-    preview.add_argument("--offline", action="store_true",
-                         help="use only the local cache, no network")
-    preview.add_argument("--refresh", action="store_true",
-                         help="ignore cached results")
-    preview.add_argument("--studios", default=DEFAULT_STUDIOS,
-                         help="studios JSON (default: studios.json)")
-    preview.add_argument("--cache", default=DEFAULT_CACHE,
-                         help="SQLite cache path")
-    preview.add_argument("--phash", action="store_true",
-                         help="also search by PHASH (runs ffmpeg per file; slow)")
-    preview.add_argument("--ffmpeg", default=None,
-                         help="ffmpeg executable (default: FFMPEG_PATH or PATH)")
-    preview.add_argument("--ffprobe", default=None,
-                         help="ffprobe executable (default: FFPROBE_PATH or PATH)")
-    preview.add_argument("--no-secondary", action="store_true",
-                         help="do not query ThePornDB and FansDB")
+    preview.add_argument(
+        "--csv", default=DEFAULT_CSV, help="preview CSV path (default: preview.csv)"
+    )
+    preview.add_argument("--recursive", action="store_true", help="scan subfolders")
+    preview.add_argument("--limit", type=int, default=None, help="process only the first N files")
+    preview.add_argument("--no-text", action="store_true", help="disable StashDB text search")
+    preview.add_argument(
+        "--offline", action="store_true", help="use only the local cache, no network"
+    )
+    preview.add_argument("--refresh", action="store_true", help="ignore cached results")
+    preview.add_argument(
+        "--studios", default=DEFAULT_STUDIOS, help="studios JSON (default: studios.json)"
+    )
+    preview.add_argument("--cache", default=DEFAULT_CACHE, help="SQLite cache path")
+    preview.add_argument(
+        "--phash", action="store_true", help="also search by PHASH (runs ffmpeg per file; slow)"
+    )
+    preview.add_argument(
+        "--ffmpeg", default=None, help="ffmpeg executable (default: FFMPEG_PATH or PATH)"
+    )
+    preview.add_argument(
+        "--ffprobe", default=None, help="ffprobe executable (default: FFPROBE_PATH or PATH)"
+    )
+    preview.add_argument(
+        "--no-secondary", action="store_true", help="do not query ThePornDB and FansDB"
+    )
     preview.set_defaults(handler=_run_preview)
 
-    apply = subparsers.add_parser(
-        "apply", help="apply approved rows from a reviewed CSV"
-    )
+    apply = subparsers.add_parser("apply", help="apply approved rows from a reviewed CSV")
     apply.add_argument("csv", help="reviewed preview CSV")
-    apply.add_argument("--root", required=True,
-                       help="folder the relative paths are based on")
-    apply.add_argument("--apply", action="store_true",
-                       help="actually rename files (default: dry-run)")
-    apply.add_argument("--log", default=DEFAULT_LOG,
-                       help="rename log path (default: rename_log.csv)")
-    apply.add_argument("--force", action="store_true",
-                       help="skip stale size/OSHASH checks")
-    apply.add_argument("--suffix-collisions", action="store_true",
-                       help="add (2), (3) instead of failing on collisions")
+    apply.add_argument("--root", required=True, help="folder the relative paths are based on")
+    apply.add_argument(
+        "--apply", action="store_true", help="actually rename files (default: dry-run)"
+    )
+    apply.add_argument(
+        "--log", default=DEFAULT_LOG, help="rename log path (default: rename_log.csv)"
+    )
+    apply.add_argument("--force", action="store_true", help="skip stale size/OSHASH checks")
+    apply.add_argument(
+        "--suffix-collisions",
+        action="store_true",
+        help="add (2), (3) instead of failing on collisions",
+    )
     apply.set_defaults(handler=_run_apply)
 
-    undo = subparsers.add_parser(
-        "undo", help="list or undo applied renames from the journal"
+    undo = subparsers.add_parser("undo", help="list or undo applied renames from the journal")
+    undo.add_argument(
+        "--list", action="store_true", help="print active journal rows with their ids"
     )
-    undo.add_argument("--list", action="store_true",
-                      help="print active journal rows with their ids")
-    undo.add_argument("--ids", default=None,
-                      help="comma-separated ids to undo (see --list)")
-    undo.add_argument("--log", default=DEFAULT_LOG,
-                      help="rename log path (default: rename_log.csv)")
-    undo.add_argument("--root", default=None,
-                      help="folder for legacy rows without a stored root")
-    undo.add_argument("--apply", action="store_true",
-                      help="actually undo (default: dry-run)")
-    undo.add_argument("--confirm-legacy", action="store_true",
-                      help="allow undoing legacy rows (requires --root)")
+    undo.add_argument("--ids", default=None, help="comma-separated ids to undo (see --list)")
+    undo.add_argument(
+        "--log", default=DEFAULT_LOG, help="rename log path (default: rename_log.csv)"
+    )
+    undo.add_argument("--root", default=None, help="folder for legacy rows without a stored root")
+    undo.add_argument("--apply", action="store_true", help="actually undo (default: dry-run)")
+    undo.add_argument(
+        "--confirm-legacy", action="store_true", help="allow undoing legacy rows (requires --root)"
+    )
     undo.set_defaults(handler=_run_undo)
 
     return parser
@@ -273,21 +282,18 @@ def _load_studios(path: str) -> dict[str, str] | None:
     """Читает studios.json; отсутствие файла — предупреждение и `{}`."""
     if not os.path.exists(path):
         print(
-            f"warning: studios file not found: {path}; "
-            f"studio matching is disabled",
+            f"warning: studios file not found: {path}; studio matching is disabled",
             file=sys.stderr,
         )
         return {}
     try:
         return load_studios(path)
     except (OSError, ValueError) as exc:
-        print(f"error: cannot read studios file {path}: {exc}",
-              file=sys.stderr)
+        print(f"error: cannot read studios file {path}: {exc}", file=sys.stderr)
         return None
 
 
-def _run_preview(args: argparse.Namespace,
-                 parser: argparse.ArgumentParser) -> int:
+def _run_preview(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     """Выполняет preview и пишет CSV; файлы не изменяются."""
     if args.refresh and args.offline:
         parser.error("--refresh cannot be used together with --offline")
@@ -310,8 +316,7 @@ def _run_preview(args: argparse.Namespace,
     offline = bool(args.offline)
     if not api_key and not offline:
         print(
-            "warning: STASHDB_API_KEY is not set; "
-            "running offline (cache + heuristics)",
+            "warning: STASHDB_API_KEY is not set; running offline (cache + heuristics)",
             file=sys.stderr,
         )
         offline = True
@@ -323,19 +328,15 @@ def _run_preview(args: argparse.Namespace,
     try:
         cache = TitleCache(args.cache)
     except (OSError, sqlite3.Error) as exc:
-        print(f"error: cannot open cache {args.cache}: {exc}",
-              file=sys.stderr)
+        print(f"error: cannot open cache {args.cache}: {exc}", file=sys.stderr)
         return 2
 
     client = StashDBClient(api_key) if api_key and not offline else None
-    secondary = {} if args.no_secondary else build_fingerprint_clients(
-        os.environ, offline=offline
-    )
+    secondary = {} if args.no_secondary else build_fingerprint_clients(os.environ, offline=offline)
     if not args.no_secondary and not offline:
         for source in missing_secondary_keys(os.environ):
             print(
-                f"warning: {source.api_key_env} is not set; "
-                f"{source.name} is skipped",
+                f"warning: {source.api_key_env} is not set; {source.name} is skipped",
                 file=sys.stderr,
             )
     try:
@@ -356,8 +357,7 @@ def _run_preview(args: argparse.Namespace,
         ).preview()
     except StashDBAuthError as exc:
         print(
-            f"error: StashDB rejected the request: {exc}; "
-            f"проверь STASHDB_API_KEY",
+            f"error: StashDB rejected the request: {exc}; проверь STASHDB_API_KEY",
             file=sys.stderr,
         )
         return 2
@@ -386,8 +386,7 @@ def _run_preview(args: argparse.Namespace,
     return 1 if report.had_transient_errors else 0
 
 
-def _run_apply(args: argparse.Namespace,
-               _parser: argparse.ArgumentParser) -> int:
+def _run_apply(args: argparse.Namespace, _parser: argparse.ArgumentParser) -> int:
     """Применяет одобренные строки; по умолчанию — dry-run."""
     root = os.path.abspath(args.root)
     if not os.path.isdir(root):
@@ -435,14 +434,11 @@ def _run_apply(args: argparse.Namespace,
             errors += 1
 
     mode = "applied" if args.apply else "dry-run"
-    print(
-        f"{mode}: {renamed} renamed, {skipped} skipped, {errors} error(s)"
-    )
+    print(f"{mode}: {renamed} renamed, {skipped} skipped, {errors} error(s)")
     return 1 if (report.had_errors or errors) else 0
 
 
-def _run_undo(args: argparse.Namespace,
-              parser: argparse.ArgumentParser) -> int:
+def _run_undo(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     """Список активных строк журнала или откат выбранных; по умолчанию dry-run."""
     if not args.list and not args.ids:
         print("error: undo needs --list or --ids", file=sys.stderr)
@@ -463,7 +459,8 @@ def _run_undo(args: argparse.Namespace,
     ids = [part for part in args.ids.split(",") if part.strip()]
     root_override = os.path.abspath(args.root) if args.root else None
     selection = select_for_undo(
-        entries, ids,
+        entries,
+        ids,
         root_override=root_override,
         confirm_legacy=args.confirm_legacy,
     )

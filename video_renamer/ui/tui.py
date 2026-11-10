@@ -4,6 +4,7 @@
 Запуск: `.venv\\Scripts\\python.exe tui.py` или `start_tui.bat`.
 Textual нужен только для этого файла; ядро проекта остаётся stdlib.
 """
+
 from __future__ import annotations
 
 import csv
@@ -158,9 +159,7 @@ class DirectoryPicker(ModalScreen[Path | None]):
             yield OptionList(id="picker-list")
             with Horizontal(classes="modal-buttons"):
                 yield Button("Отмена", id="picker-cancel")
-                yield Button(
-                    "Выбрать", id="picker-choose", variant="primary"
-                )
+                yield Button("Выбрать", id="picker-choose", variant="primary")
 
     def on_mount(self) -> None:
         self._reload()
@@ -194,9 +193,7 @@ class DirectoryPicker(ModalScreen[Path | None]):
         for folder in folders:
             options.append(Option(Text(Path(folder).name), id=folder))
         if not options:
-            options.append(
-                Option(Text("(подпапок нет)"), id=None, disabled=True)
-            )
+            options.append(Option(Text("(подпапок нет)"), id=None, disabled=True))
         option_list = self.query_one("#picker-list", OptionList)
         option_list.clear_options()
         option_list.add_options(options)
@@ -217,9 +214,7 @@ class DirectoryPicker(ModalScreen[Path | None]):
         self._reload()
         self.query_one("#picker-list", OptionList).focus()
 
-    def on_option_list_option_selected(
-        self, event: OptionList.OptionSelected
-    ) -> None:
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
         option_id = event.option_id
         if not option_id:
@@ -276,9 +271,7 @@ class ConfirmApply(ModalScreen[bool]):
             )
             with Horizontal(classes="modal-buttons"):
                 yield Button("Отмена", id="confirm-cancel")
-                yield Button(
-                    "Переименовать", id="confirm-apply", variant="success"
-                )
+                yield Button("Переименовать", id="confirm-apply", variant="success")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "confirm-apply")
@@ -361,8 +354,7 @@ class ApplyResultModal(ModalScreen[None]):
                     for result in errors[:20]:
                         yield Static(
                             Text(
-                                f"{result.old_rel} → {result.new_rel}\n"
-                                f"{result.message}",
+                                f"{result.old_rel} → {result.new_rel}\n{result.message}",
                                 style="#fca5a5",
                             )
                         )
@@ -396,9 +388,7 @@ class CandidatePicker(ModalScreen[Scene | None]):
             title = scene.title or "(без названия)"
             studio = scene.studio.name if scene.studio else "—"
             date = scene.release_date or scene.date or "—"
-            performers = ", ".join(
-                performer.display_name for performer in scene.performers
-            ) or "—"
+            performers = ", ".join(performer.display_name for performer in scene.performers) or "—"
             label = Text(
                 f"{title} — {studio} · {date} · {performers}",
                 overflow="ellipsis",
@@ -419,12 +409,9 @@ class CandidatePicker(ModalScreen[Scene | None]):
             with Horizontal(classes="modal-buttons"):
                 yield Button("Отмена", id="candidate-cancel")
 
-    def on_option_list_option_selected(
-        self, event: OptionList.OptionSelected
-    ) -> None:
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         scene = next(
-            (item for item in self.row.candidates
-             if item.id == event.option_id),
+            (item for item in self.row.candidates if item.id == event.option_id),
             None,
         )
         self.dismiss(scene)
@@ -476,16 +463,13 @@ class NameEditor(ModalScreen[str | None]):
         if value_suffix.casefold() != suffix.casefold():
             error.update(
                 Text(
-                    f"Расширение должно совпадать с исходным: {suffix} "
-                    "(регистр не важен).",
+                    f"Расширение должно совпадать с исходным: {suffix} (регистр не важен).",
                     style="#f87171",
                 )
             )
             return
         if len(value) > 255:
-            error.update(
-                Text("Имя длиннее 255 символов.", style="#f87171")
-            )
+            error.update(Text("Имя длиннее 255 символов.", style="#f87171"))
             return
         if not is_valid_final_stem(os.path.splitext(value)[0]):
             error.update(Text("Недопустимое имя для Windows.", style="#f87171"))
@@ -536,12 +520,10 @@ class StudioDialog(ModalScreen[None]):
                 yield Button("StashDB", id="studio-stashdb")
                 yield Button("FansDB", id="studio-fansdb")
                 yield Button("ThePornDB", id="studio-theporndb")
-                yield Button("Слить всё", id="studio-merge",
-                             variant="primary")
+                yield Button("Слить всё", id="studio-merge", variant="primary")
             yield RichLog(id="studio-log", wrap=True)
             with Horizontal(classes="modal-buttons"):
-                yield Button("Отменить", id="studio-cancel",
-                             variant="error", disabled=True)
+                yield Button("Отменить", id="studio-cancel", variant="error", disabled=True)
                 yield Button("Закрыть", id="studio-close")
 
     def _set_running(self, running: bool) -> None:
@@ -594,8 +576,7 @@ class StudioDialog(ModalScreen[None]):
             style = "#34d399" if code == 0 else "#f87171"
             log.write(Text(f"Готово: код {code}", style=style))
             app.notify(
-                f"Студии: {kind} завершён" if code == 0
-                else f"Студии: ошибка ({code})",
+                f"Студии: {kind} завершён" if code == 0 else f"Студии: ошибка ({code})",
                 severity="information" if code == 0 else "error",
                 timeout=6,
             )
@@ -648,7 +629,9 @@ class ConfirmUndo(ModalScreen[bool]):
             with Horizontal(id="undo-buttons"):
                 yield Button("Отмена", id="undo-cancel")
                 yield Button(
-                    "Откатить", id="undo-confirm", variant="success",
+                    "Откатить",
+                    id="undo-confirm",
+                    variant="success",
                     disabled=self._has_legacy,
                 )
 
@@ -755,13 +738,15 @@ class UndoLogScreen(ModalScreen[None]):
         ids = sorted(self._selected)
         has_legacy = any(self._active[i].legacy for i in ids if i in self._active)
         selection = select_for_undo(
-            self._all_entries, ids,
+            self._all_entries,
+            ids,
             root_override=self._folder if has_legacy else None,
             confirm_legacy=True,
         )
         preview = run_undo(selection, log_path=self._log_path, dry_run=True)
-        lines = [f"{r.old_rel} → {r.new_rel}: {r.status} {r.message}".rstrip()
-                 for r in preview.results]
+        lines = [
+            f"{r.old_rel} → {r.new_rel}: {r.status} {r.message}".rstrip() for r in preview.results
+        ]
         lines += [f"пропуск: {error}" for error in selection.errors]
         body = "Откат выбранных строк (предпросмотр):\n" + "\n".join(lines)
         if has_legacy:
@@ -771,8 +756,7 @@ class UndoLogScreen(ModalScreen[None]):
             lambda confirmed: self._undo_confirmed(confirmed, ids, has_legacy),
         )
 
-    def _undo_confirmed(self, confirmed: bool | None, ids: list[str],
-                        has_legacy: bool) -> None:
+    def _undo_confirmed(self, confirmed: bool | None, ids: list[str], has_legacy: bool) -> None:
         if confirmed:
             self._run_undo(ids, has_legacy)
 
@@ -781,7 +765,8 @@ class UndoLogScreen(ModalScreen[None]):
         try:
             entries = read_log(self._log_path)
             selection = select_for_undo(
-                entries, ids,
+                entries,
+                ids,
                 root_override=self._folder if has_legacy else None,
                 confirm_legacy=has_legacy,
             )
@@ -792,7 +777,8 @@ class UndoLogScreen(ModalScreen[None]):
         renamed = sum(1 for r in report.results if r.status == "renamed")
         failures = [
             f"{r.id}: {r.message or r.status}"
-            for r in report.results if r.status not in ("renamed", "dry-run")
+            for r in report.results
+            if r.status not in ("renamed", "dry-run")
         ]
         failures += [f"пропуск: {error}" for error in selection.errors]
         self.app.call_from_thread(self._undo_done, renamed, failures)
@@ -887,24 +873,16 @@ class RenamerApp(App[None]):
                     yield Button("Одобрить", id="approve", variant="success")
                     yield Button("Снять", id="reject", variant="warning")
                     yield Button("Применить", id="apply", variant="error")
-                yield DataTable(
-                    id="table", cursor_type="row", zebra_stripes=True
-                )
+                yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
                 yield Static("Выберите строку", id="detail")
-                yield ProgressBar(
-                    total=100, show_eta=False, id="progress"
-                )
+                yield ProgressBar(total=100, show_eta=False, id="progress")
         yield Footer()
 
     def on_resize(self, event) -> None:
-        too_small = (
-            event.size.width < self.MIN_WIDTH
-            or event.size.height < self.MIN_HEIGHT
-        )
+        too_small = event.size.width < self.MIN_WIDTH or event.size.height < self.MIN_HEIGHT
         if too_small and not self._size_warned:
             self.notify(
-                f"Увеличьте окно минимум до "
-                f"{self.MIN_WIDTH}×{self.MIN_HEIGHT} символов",
+                f"Увеличьте окно минимум до {self.MIN_WIDTH}×{self.MIN_HEIGHT} символов",
                 severity="warning",
                 timeout=8,
             )
@@ -926,11 +904,7 @@ class RenamerApp(App[None]):
         self.query_one("#folder", Input).focus()
 
     def _update_environment(self) -> None:
-        key_status = (
-            "StashDB: ключ найден"
-            if self.key
-            else "StashDB: ключа нет — offline"
-        )
+        key_status = "StashDB: ключ найден" if self.key else "StashDB: ключа нет — offline"
         self.query_one("#api-status", Static).update(Text(key_status))
         studios = STUDIOS_PATH
         if studios.exists():
@@ -946,7 +920,11 @@ class RenamerApp(App[None]):
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy
         for selector in (
-            "#preview", "#studios", "#browse", "#approve", "#reject",
+            "#preview",
+            "#studios",
+            "#browse",
+            "#approve",
+            "#reject",
             "#filter",
         ):
             self.query_one(selector).disabled = busy
@@ -990,9 +968,7 @@ class RenamerApp(App[None]):
         self.query_one("#candidates", Button).disabled = (
             self._busy or row is None or not bool(row.candidates)
         )
-        self.query_one("#apply", Button).disabled = (
-            self._busy or not self.model.approved_rows()
-        )
+        self.query_one("#apply", Button).disabled = self._busy or not self.model.approved_rows()
 
     def _update_detail(self, index: int) -> None:
         row = self.model.rows[index]
@@ -1003,8 +979,7 @@ class RenamerApp(App[None]):
         detail.append(f"{row.new_rel}\n", style="#e2e8f0")
         detail.append("Источник: ", style="bold #94a3b8")
         detail.append(
-            f"{SOURCE_LABELS.get(row.source, row.source)} · "
-            f"confidence {row.confidence:.2f}\n",
+            f"{SOURCE_LABELS.get(row.source, row.source)} · confidence {row.confidence:.2f}\n",
             style=SOURCE_STYLES.get(row.source, ""),
         )
         if row.note:
@@ -1050,9 +1025,7 @@ class RenamerApp(App[None]):
         if table.row_count == 0 or table.cursor_row < 0:
             return None
         try:
-            cell = table.coordinate_to_cell_key(
-                (table.cursor_row, 0)
-            )
+            cell = table.coordinate_to_cell_key((table.cursor_row, 0))
         except Exception:
             return None
         return int(cell.row_key.value)
@@ -1156,9 +1129,7 @@ class RenamerApp(App[None]):
                 client,
                 offline=not bool(self.key),
                 progress=progress,
-                extra_clients=build_fingerprint_clients(
-                    os.environ, offline=not bool(self.key)
-                ),
+                extra_clients=build_fingerprint_clients(os.environ, offline=not bool(self.key)),
             )
             self._service = service
             return service.preview()
@@ -1183,8 +1154,7 @@ class RenamerApp(App[None]):
         self._refresh_table()
         self.query_one("#table", DataTable).focus()
         self._set_status(
-            f"Готово: {len(report.rows)} строк. "
-            "Проверьте таблицу и нажмите «Применить»."
+            f"Готово: {len(report.rows)} строк. Проверьте таблицу и нажмите «Применить»."
         )
         if report.warnings:
             self.notify(
@@ -1231,8 +1201,7 @@ class RenamerApp(App[None]):
             return
         row = self.model.rows[index]
         if not row.candidates:
-            self.notify("У этой строки нет альтернативных кандидатов",
-                        severity="warning")
+            self.notify("У этой строки нет альтернативных кандидатов", severity="warning")
             return
         self.push_screen(
             CandidatePicker(row),
@@ -1354,15 +1323,8 @@ class RenamerApp(App[None]):
 
     def _apply_done(self, report: ApplyReport, log_error: str = "") -> None:
         self._set_busy(False)
-        renamed = {
-            result.old_rel
-            for result in report.results
-            if result.status == "renamed"
-        }
-        kept = [
-            row for row in self.model.rows
-            if not row.approved or row.old_rel not in renamed
-        ]
+        renamed = {result.old_rel for result in report.results if result.status == "renamed"}
+        kept = [row for row in self.model.rows if not row.approved or row.old_rel not in renamed]
         self.model.set_rows(kept)
         self._refresh_table()
         if log_error:
@@ -1373,17 +1335,10 @@ class RenamerApp(App[None]):
                 timeout=10,
             )
         elif report.had_errors and kept:
-            self._set_status(
-                f"Применено: {len(renamed)}; строк с ошибками осталось: "
-                f"{len(kept)}"
-            )
+            self._set_status(f"Применено: {len(renamed)}; строк с ошибками осталось: {len(kept)}")
         else:
             self._set_status(f"Применено: {len(renamed)}")
-        self.push_screen(
-            ApplyResultModal(
-                report, log_path=str(LOG_PATH), log_error=log_error
-            )
-        )
+        self.push_screen(ApplyResultModal(report, log_path=str(LOG_PATH), log_error=log_error))
 
     def _apply_failed(self, exc: Exception) -> None:
         self._set_busy(False)
@@ -1399,9 +1354,7 @@ class RenamerApp(App[None]):
             self.model.filter = str(event.value)
             self._refresh_table()
 
-    def on_data_table_row_highlighted(
-        self, event: DataTable.RowHighlighted
-    ) -> None:
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         try:
             self._update_detail(int(event.row_key.value))
         except (TypeError, ValueError):

@@ -1,4 +1,5 @@
 """Тесты ThePornDB: список студий через findStudio по именам."""
+
 import json
 
 from video_renamer.scrapers.theporndb import (
@@ -28,30 +29,36 @@ def test_build_lookup_query_uses_aliases_and_variables():
 
 
 def test_parse_lookup_response_adds_parent_and_children():
-    studios = parse_lookup_response({
-        "s0": {
-            "id": "1", "name": "Brazzers",
-            "parent": {"id": "0", "name": "Brazzers Network"},
-            "child_studios": [{"id": "2", "name": "Brazzers Exxtra"}],
+    studios = parse_lookup_response(
+        {
+            "s0": {
+                "id": "1",
+                "name": "Brazzers",
+                "parent": {"id": "0", "name": "Brazzers Network"},
+                "child_studios": [{"id": "2", "name": "Brazzers Exxtra"}],
+            },
+            "s1": None,
         },
-        "s1": None,
-    }, 2)
+        2,
+    )
     assert [studio.name for studio in studios] == [
-        "Brazzers", "Brazzers Network", "Brazzers Exxtra"
+        "Brazzers",
+        "Brazzers Network",
+        "Brazzers Exxtra",
     ]
 
 
 def test_run_lookup_batches_names():
-    fake = FakeClient([
-        {"s0": {"id": "1", "name": "Alpha"}, "s1": {"id": "2", "name": "Beta"}},
-        {"s0": {"id": "3", "name": "Gamma"}},
-    ])
+    fake = FakeClient(
+        [
+            {"s0": {"id": "1", "name": "Alpha"}, "s1": {"id": "2", "name": "Beta"}},
+            {"s0": {"id": "3", "name": "Gamma"}},
+        ]
+    )
     report = run_lookup(fake, ["Alpha", "Beta", "Gamma"], batch_size=2)
     assert report.complete is True
     assert report.batches_fetched == 2
-    assert [studio.name for studio in report.studios] == [
-        "Alpha", "Beta", "Gamma"
-    ]
+    assert [studio.name for studio in report.studios] == ["Alpha", "Beta", "Gamma"]
     assert len(fake.calls) == 2
 
 
@@ -60,9 +67,7 @@ def test_load_seed_names_from_dict_and_list(tmp_path):
     second = tmp_path / "b.json"
     first.write_text(json.dumps({"brazzers": "Brazzers"}), encoding="utf-8")
     second.write_text(json.dumps(["Brazzers", "Hussie Pass"]), encoding="utf-8")
-    assert load_seed_names([str(first), str(second)]) == [
-        "Brazzers", "Hussie Pass"
-    ]
+    assert load_seed_names([str(first), str(second)]) == ["Brazzers", "Hussie Pass"]
 
 
 def test_main_apply_writes_values_through_find_studio(tmp_path, monkeypatch):
@@ -86,17 +91,25 @@ def test_main_apply_writes_values_through_find_studio(tmp_path, monkeypatch):
     out = tmp_path / "studios_theporndb.json"
     checkpoint = tmp_path / "cp.json"
     raw = tmp_path / "raw.json"
-    code = main([
-        "--seed", str(seed),
-        "--out", str(out),
-        "--checkpoint", str(checkpoint),
-        "--raw", str(raw),
-        "--batch-size", "1", "--delay", "0", "--apply",
-    ])
+    code = main(
+        [
+            "--seed",
+            str(seed),
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(checkpoint),
+            "--raw",
+            str(raw),
+            "--batch-size",
+            "1",
+            "--delay",
+            "0",
+            "--apply",
+        ]
+    )
     assert code == 0
-    assert json.loads(out.read_text(encoding="utf-8")) == {
-        "brazzers": "Brazzers"
-    }
+    assert json.loads(out.read_text(encoding="utf-8")) == {"brazzers": "Brazzers"}
     assert json.loads(checkpoint.read_text(encoding="utf-8"))["complete"] is True
 
 

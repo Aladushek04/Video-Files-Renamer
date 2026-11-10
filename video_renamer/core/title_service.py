@@ -21,6 +21,7 @@ subprocess — это задача CLI/TUI.
 
 Зависимостей нет — только стандартная библиотека.
 """
+
 import ntpath
 import os
 import stat
@@ -65,8 +66,7 @@ __all__ = [
 ]
 
 VIDEO_EXTENSIONS = frozenset(
-    {".mp4", ".mkv", ".avi", ".wmv", ".mov", ".m4v", ".webm",
-     ".ts", ".mpg", ".mpeg"}
+    {".mp4", ".mkv", ".avi", ".wmv", ".mov", ".m4v", ".webm", ".ts", ".mpg", ".mpeg"}
 )
 _TMP_PREFIX = "__ren_tmp_"
 _MAX_FULL_NAME = 255
@@ -191,8 +191,7 @@ def _inside_root(path: str, root_real: str) -> bool:
     """Лежит ли путь внутри корня после нормализации."""
     try:
         common = os.path.commonpath(
-            [os.path.normcase(os.path.realpath(path)),
-             os.path.normcase(root_real)]
+            [os.path.normcase(os.path.realpath(path)), os.path.normcase(root_real)]
         )
     except ValueError:
         return False
@@ -207,9 +206,7 @@ def _path_key(path: str) -> str:
 def _abspath_inside_root(path: str, root: str) -> bool:
     """Проверка containment без разрешения symlink (после `abspath`)."""
     try:
-        common = os.path.commonpath(
-            [os.path.normcase(path), os.path.normcase(root)]
-        )
+        common = os.path.commonpath([os.path.normcase(path), os.path.normcase(root)])
     except ValueError:
         return False
     return common == os.path.normcase(root)
@@ -334,9 +331,7 @@ class TitleService:
         self._phash_func = phash_func or self._default_phash
 
     def _default_phash(self, path: str) -> str:
-        return format_phash(
-            phash_from_path(path, ffmpeg=self._ffmpeg, ffprobe=self._ffprobe)
-        )
+        return format_phash(phash_from_path(path, ffmpeg=self._ffmpeg, ffprobe=self._ffprobe))
 
     @property
     def root(self) -> str:
@@ -367,16 +362,11 @@ class TitleService:
 
         parent = os.path.dirname(row.old_rel)
         desired = self._relative(parent, name)
-        used = {
-            os.path.normcase(other.new_rel)
-            for other in rows
-            if other.old_rel != row.old_rel
-        }
+        used = {os.path.normcase(other.new_rel) for other in rows if other.old_rel != row.old_rel}
         moving = {
             os.path.normcase(other.old_rel)
             for other in rows
-            if other.old_rel != row.old_rel
-            and other.new_rel != other.old_rel
+            if other.old_rel != row.old_rel and other.new_rel != other.old_rel
         }
         number = 1
         while True:
@@ -412,7 +402,7 @@ class TitleService:
         """Строит предпросмотр, ничего не изменяя на диске."""
         files = list(iter_video_files(self._root, self._recursive))
         if self._limit is not None:
-            files = files[:max(0, self._limit)]
+            files = files[: max(0, self._limit)]
 
         total = len(files)
         self._emit("scan", total, total, f"{total} files")
@@ -421,9 +411,7 @@ class TitleService:
         had_transient = False
 
         candidates = self._collect(files, total, warnings)
-        oshash_failures, oshash_transient = self._resolve_fingerprints(
-            candidates, warnings
-        )
+        oshash_failures, oshash_transient = self._resolve_fingerprints(candidates, warnings)
         phash_failures, phash_transient = (
             self._resolve_phash(candidates, warnings) if self._phash else ({}, False)
         )
@@ -433,13 +421,14 @@ class TitleService:
 
         for candidate in candidates:
             failed = [
-                name for name, digests in oshash_failures.items()
+                name
+                for name, digests in oshash_failures.items()
                 if candidate.oshash and candidate.oshash in digests
             ]
             failed += [
-                name for name, digests in phash_failures.items()
-                if candidate.phash and candidate.phash in digests
-                and name not in failed
+                name
+                for name, digests in phash_failures.items()
+                if candidate.phash and candidate.phash in digests and name not in failed
             ]
             candidate.failed_sources = failed
             candidate.text_error = candidate.rel in text_failed
@@ -480,20 +469,14 @@ class TitleService:
                 results.append(None)
                 approved.append((index, row))
             else:
-                results.append(ApplyResult(
-                    row.old_rel, row.new_rel, "skipped", "not approved"
-                ))
+                results.append(ApplyResult(row.old_rel, row.new_rel, "skipped", "not approved"))
 
         root_real = os.path.realpath(self._root)
         items: list[_ApplyItem] = []
         for index, row in approved:
-            item, error = self._prepare_apply_item(
-                index, row, root_real, force
-            )
+            item, error = self._prepare_apply_item(index, row, root_real, force)
             if error:
-                results[index] = ApplyResult(
-                    row.old_rel, row.new_rel, "error", error
-                )
+                results[index] = ApplyResult(row.old_rel, row.new_rel, "error", error)
             elif item is not None:
                 items.append(item)
 
@@ -505,9 +488,7 @@ class TitleService:
             ready = []
             blocked: list[_ApplyItem] = []
             for item in pending:
-                error = self._resolve_apply_target(
-                    item, moving, claimed, suffix_collisions
-                )
+                error = self._resolve_apply_target(item, moving, claimed, suffix_collisions)
                 if error:
                     results[item.index] = ApplyResult(
                         item.row.old_rel, item.row.new_rel, "error", error
@@ -536,7 +517,9 @@ class TitleService:
             except OSError as exc:
                 message = str(exc) or exc.__class__.__name__
                 results[item.index] = ApplyResult(
-                    item.row.old_rel, item.new_rel, "error",
+                    item.row.old_rel,
+                    item.new_rel,
+                    "error",
                     f"temporary rename failed: {message}",
                 )
             else:
@@ -556,19 +539,13 @@ class TitleService:
                 else:
                     item.temp_path = None
                     item.renamed = True
-                    results[item.index] = ApplyResult(
-                        item.row.old_rel, item.new_rel, "renamed", ""
-                    )
+                    results[item.index] = ApplyResult(item.row.old_rel, item.new_rel, "renamed", "")
                     continue
 
-            rollback_errors = self._rollback_apply_item(
-                item, active, results, frozenset()
-            )
+            rollback_errors = self._rollback_apply_item(item, active, results, frozenset())
             if rollback_errors:
                 error += "; rollback failed: " + "; ".join(rollback_errors)
-            results[item.index] = ApplyResult(
-                item.row.old_rel, item.new_rel, "error", error
-            )
+            results[item.index] = ApplyResult(item.row.old_rel, item.new_rel, "error", error)
 
         return self._apply_report(results)
 
@@ -585,20 +562,25 @@ class TitleService:
         for label, value in (("old", old_rel), ("new", new_rel)):
             if "\0" in value:
                 return None, f"{label} path contains NUL"
-            if (not value or os.path.isabs(value) or ntpath.isabs(value)
-                    or os.path.splitdrive(value)[0]
-                    or ntpath.splitdrive(value)[0]):
+            if (
+                not value
+                or os.path.isabs(value)
+                or ntpath.isabs(value)
+                or os.path.splitdrive(value)[0]
+                or ntpath.splitdrive(value)[0]
+            ):
                 return None, f"{label} path must be relative"
 
         old_path = os.path.abspath(os.path.join(self._root, old_rel))
         new_path = os.path.abspath(os.path.join(self._root, new_rel))
-        if (not _abspath_inside_root(old_path, self._root)
-                or not _abspath_inside_root(new_path, self._root)
-                or not _inside_root(old_path, root_real)
-                or not _inside_root(new_path, root_real)):
+        if (
+            not _abspath_inside_root(old_path, self._root)
+            or not _abspath_inside_root(new_path, self._root)
+            or not _inside_root(old_path, root_real)
+            or not _inside_root(new_path, root_real)
+        ):
             return None, "path escapes root"
-        if (ntpath.normcase(_relative_parent(old_rel))
-                != ntpath.normcase(_relative_parent(new_rel))):
+        if ntpath.normcase(_relative_parent(old_rel)) != ntpath.normcase(_relative_parent(new_rel)):
             return None, "new path must stay in the old file's folder"
 
         new_name = ntpath.basename(new_rel)
@@ -622,10 +604,7 @@ class TitleService:
 
         if not force:
             if row.size is not None and source_stat.st_size != row.size:
-                return None, (
-                    f"stale size: expected {row.size}, "
-                    f"actual {source_stat.st_size}"
-                )
+                return None, (f"stale size: expected {row.size}, actual {source_stat.st_size}")
             try:
                 digest = self._oshash_func(old_path)
             except (OSError, OshashError) as exc:
@@ -653,16 +632,12 @@ class TitleService:
         original_stem, suffix = os.path.splitext(item.new_rel)
         number = 1
         while True:
-            candidate_rel = item.new_rel if number == 1 else _collision_name(
-                original_stem, suffix, number
+            candidate_rel = (
+                item.new_rel if number == 1 else _collision_name(original_stem, suffix, number)
             )
-            candidate_path = os.path.abspath(
-                os.path.join(self._root, candidate_rel)
-            )
+            candidate_path = os.path.abspath(os.path.join(self._root, candidate_rel))
             key = _path_key(candidate_path)
-            occupied = key in claimed or (
-                os.path.lexists(candidate_path) and key not in moving
-            )
+            occupied = key in claimed or (os.path.lexists(candidate_path) and key not in moving)
             if not occupied:
                 item.new_rel = candidate_rel
                 item.new_path = candidate_path
@@ -700,23 +675,29 @@ class TitleService:
         if item.renamed and _path_key(source) == _path_key(item.old_path):
             item.renamed = False
             results[item.index] = ApplyResult(
-                item.row.old_rel, item.new_rel, "error",
+                item.row.old_rel,
+                item.new_rel,
+                "error",
                 "rolled back because another rename failed",
             )
             return []
 
         errors: list[str] = []
         if os.path.lexists(item.old_path):
-            occupant = next((
-                other for other in active
-                if other.index != item.index
-                and other.renamed
-                and _path_key(other.new_path) == _path_key(item.old_path)
-            ), None)
+            occupant = next(
+                (
+                    other
+                    for other in active
+                    if other.index != item.index
+                    and other.renamed
+                    and _path_key(other.new_path) == _path_key(item.old_path)
+                ),
+                None,
+            )
             if occupant is not None:
-                errors.extend(self._rollback_apply_item(
-                    occupant, active, results, visiting | {item.index}
-                ))
+                errors.extend(
+                    self._rollback_apply_item(occupant, active, results, visiting | {item.index})
+                )
             if os.path.lexists(item.old_path):
                 errors.append(f"{item.row.old_rel}: original path is occupied")
                 return errors
@@ -732,7 +713,9 @@ class TitleService:
             item.renamed = False
             if was_renamed:
                 results[item.index] = ApplyResult(
-                    item.row.old_rel, item.new_rel, "error",
+                    item.row.old_rel,
+                    item.new_rel,
+                    "error",
                     "rolled back because another rename failed",
                 )
         return errors
@@ -750,9 +733,7 @@ class TitleService:
             had_errors=any(result.status == "error" for result in final),
         )
 
-    def _collect(
-        self, files: Sequence[str], total: int, warnings: list[str]
-    ) -> list[_Candidate]:
+    def _collect(self, files: Sequence[str], total: int, warnings: list[str]) -> list[_Candidate]:
         """Читает размер/OSHASH и разбирает локальные имена."""
         candidates: list[_Candidate] = []
         if not total:
@@ -775,17 +756,19 @@ class TitleService:
                 hash_error = str(exc) or exc.__class__.__name__
 
             _, suffix = os.path.splitext(name)
-            candidates.append(_Candidate(
-                path=path,
-                rel=rel,
-                parent=os.path.dirname(rel),
-                name=name,
-                suffix=suffix,
-                local=parse_local_name(name, self._studios),
-                oshash=digest,
-                size=size,
-                hash_error=hash_error,
-            ))
+            candidates.append(
+                _Candidate(
+                    path=path,
+                    rel=rel,
+                    parent=os.path.dirname(rel),
+                    name=name,
+                    suffix=suffix,
+                    local=parse_local_name(name, self._studios),
+                    oshash=digest,
+                    size=size,
+                    hash_error=hash_error,
+                )
+            )
             self._emit("hash", index + 1, total, rel)
         return candidates
 
@@ -801,9 +784,7 @@ class TitleService:
 
     def _fingerprint_clients(self) -> list[tuple[str, StashDBClient | None]]:
         """Источники в порядке приоритета: StashDB, затем ThePornDB и FansDB."""
-        clients: list[tuple[str, StashDBClient | None]] = [
-            (PRIMARY_SOURCE_NAME, self._client)
-        ]
+        clients: list[tuple[str, StashDBClient | None]] = [(PRIMARY_SOURCE_NAME, self._client)]
         for source in FINGERPRINT_SOURCES[1:]:
             client = self._extra_clients.get(source.name)
             if client is not None:
@@ -879,10 +860,7 @@ class TitleService:
         """Текст предупреждения о сбое источника; для вторичных — без слова StashDB."""
         if name == PRIMARY_SOURCE_NAME:
             return f"{name} {algorithm} lookup failed: {exc}"
-        env_name = next(
-            source.api_key_env for source in FINGERPRINT_SOURCES
-            if source.name == name
-        )
+        env_name = next(source.api_key_env for source in FINGERPRINT_SOURCES if source.name == name)
         if isinstance(exc, StashDBAuthError):
             return f"{name} {algorithm}: ключ отклонён, проверь {env_name}"
         if isinstance(exc, StashDBTransientError):
@@ -896,9 +874,9 @@ class TitleService:
 
         Возвращает сбойные хэши по каждому источнику и признак временной ошибки.
         """
-        unique = list(dict.fromkeys(
-            candidate.oshash for candidate in candidates if candidate.oshash
-        ))
+        unique = list(
+            dict.fromkeys(candidate.oshash for candidate in candidates if candidate.oshash)
+        )
         per_source: dict[str, dict[str, list[Scene]]] = {}
         failures: dict[str, set[str]] = {}
         fetched = 0
@@ -914,10 +892,9 @@ class TitleService:
 
         for candidate in candidates:
             if candidate.oshash:
-                candidate.fingerprint_scenes = merge_scenes([
-                    per_source[name].get(candidate.oshash, [])
-                    for name in per_source
-                ])
+                candidate.fingerprint_scenes = merge_scenes(
+                    [per_source[name].get(candidate.oshash, []) for name in per_source]
+                )
 
         self._emit(
             "fingerprint",
@@ -935,18 +912,16 @@ class TitleService:
         Возвращает сбойные хэши по источникам и признак временной ошибки.
         """
         pending = [
-            candidate for candidate in candidates
-            if candidate.oshash and not candidate.fingerprint_scenes
-            and not candidate.hash_error
+            candidate
+            for candidate in candidates
+            if candidate.oshash and not candidate.fingerprint_scenes and not candidate.hash_error
         ]
         total = len(pending)
         for index, candidate in enumerate(pending):
             candidate.phash = self._local_phash(candidate)
             self._emit("phash", index + 1, total, candidate.rel)
 
-        digests = list(dict.fromkeys(
-            candidate.phash for candidate in pending if candidate.phash
-        ))
+        digests = list(dict.fromkeys(candidate.phash for candidate in pending if candidate.phash))
         per_source: dict[str, dict[str, list[Scene]]] = {}
         failures: dict[str, set[str]] = {}
         transient = False
@@ -960,10 +935,9 @@ class TitleService:
 
         for candidate in pending:
             if candidate.phash:
-                candidate.phash_scenes = merge_scenes([
-                    per_source[name].get(candidate.phash, [])
-                    for name in per_source
-                ])
+                candidate.phash_scenes = merge_scenes(
+                    [per_source[name].get(candidate.phash, []) for name in per_source]
+                )
         self._emit("phash", total, total, "")
         return failures, transient
 
@@ -982,9 +956,7 @@ class TitleService:
             self._cache.put_local_phash(candidate.oshash, candidate.size, value)
         return value
 
-    def _resolve_text(
-        self, candidates: Sequence[_Candidate], warnings: list[str]
-    ) -> set[str]:
+    def _resolve_text(self, candidates: Sequence[_Candidate], warnings: list[str]) -> set[str]:
         """Текстовый поиск для файлов без fingerprint.
 
         Кэш текстовых запросов читается и в `offline`-режиме: `offline`
@@ -1017,17 +989,12 @@ class TitleService:
                 try:
                     found = self._client.search_scenes(term, limit=10)
                 except StashDBTransientError as exc:
-                    warnings.append(
-                        f"StashDB text search failed for "
-                        f"{candidate.rel}: {exc}"
-                    )
+                    warnings.append(f"StashDB text search failed for {candidate.rel}: {exc}")
                     failed.add(candidate.rel)
                 else:
                     candidate.text_scenes = _as_scenes(found)
                     if self._cache is not None:
-                        self._cache.put_text_query(
-                            term, candidate.text_scenes
-                        )
+                        self._cache.put_text_query(term, candidate.text_scenes)
             self._emit("text", index + 1, total, candidate.rel)
         return failed
 
@@ -1047,13 +1014,9 @@ class TitleService:
 
             note = match.note
             if candidate.hash_error:
-                note = _join_note(
-                    note, f"hash error: {candidate.hash_error}"
-                )
+                note = _join_note(note, f"hash error: {candidate.hash_error}")
             if candidate.phash_error:
-                note = _join_note(
-                    note, f"phash error: {candidate.phash_error}"
-                )
+                note = _join_note(note, f"phash error: {candidate.phash_error}")
             for name in candidate.failed_sources:
                 token = "stashdb_error" if name == PRIMARY_SOURCE_NAME else f"{name}_error"
                 note = _join_note(note, token)
@@ -1065,26 +1028,26 @@ class TitleService:
                 approved = False
             else:
                 source = match.source
-                approved = bool(
-                    match.approved and is_valid_final_stem(final_stem)
-                )
+                approved = bool(match.approved and is_valid_final_stem(final_stem))
 
-            planned.append(_Planned(
-                candidate=candidate,
-                match=match,
-                final_name=final_name,
-                final_stem=final_stem,
-                source=source,
-                approved=approved,
-                note=note,
-            ))
+            planned.append(
+                _Planned(
+                    candidate=candidate,
+                    match=match,
+                    final_name=final_name,
+                    final_stem=final_stem,
+                    source=source,
+                    approved=approved,
+                    note=note,
+                )
+            )
         return planned
 
     @staticmethod
     def _stem(name: str, suffix: str) -> str:
         """Stem из полного имени с учётом расширения."""
         if suffix and name.endswith(suffix):
-            return name[:-len(suffix)]
+            return name[: -len(suffix)]
         return name
 
     def _resolve_collisions(self, planned: Sequence[_Planned]) -> list[PreviewRow]:
@@ -1107,45 +1070,37 @@ class TitleService:
             if final_name != candidate.name:
                 number = 1
                 while True:
-                    final_name = _collision_name(
-                        item.final_stem, candidate.suffix, number
-                    )
+                    final_name = _collision_name(item.final_stem, candidate.suffix, number)
                     final_stem = self._stem(final_name, candidate.suffix)
                     rel = self._relative(candidate.parent, final_name)
                     key = os.path.normcase(rel)
                     occupied = key in claimed
                     if not occupied:
                         full = os.path.join(self._root, rel)
-                        occupied = (
-                            os.path.lexists(full) and key not in moving
-                        )
+                        occupied = os.path.lexists(full) and key not in moving
                     if not occupied:
                         break
                     number += 1
 
                 if number > 1:
                     note = _join_note(note, f"collision: ({number})")
-                approved = bool(
-                    approved and is_valid_final_stem(final_stem)
-                )
-                claimed.add(
-                    os.path.normcase(
-                        self._relative(candidate.parent, final_name)
-                    )
-                )
+                approved = bool(approved and is_valid_final_stem(final_stem))
+                claimed.add(os.path.normcase(self._relative(candidate.parent, final_name)))
 
-            rows.append(PreviewRow(
-                approved=approved,
-                old_rel=candidate.rel,
-                new_rel=self._relative(candidate.parent, final_name),
-                source=item.source,
-                confidence=item.match.confidence,
-                scene_id=item.match.scene.id if item.match.scene else "",
-                note=note,
-                oshash=candidate.oshash,
-                size=candidate.size,
-                candidates=item.match.candidates,
-            ))
+            rows.append(
+                PreviewRow(
+                    approved=approved,
+                    old_rel=candidate.rel,
+                    new_rel=self._relative(candidate.parent, final_name),
+                    source=item.source,
+                    confidence=item.match.confidence,
+                    scene_id=item.match.scene.id if item.match.scene else "",
+                    note=note,
+                    oshash=candidate.oshash,
+                    size=candidate.size,
+                    candidates=item.match.candidates,
+                )
+            )
         return rows
 
     @staticmethod
@@ -1153,9 +1108,7 @@ class TitleService:
         """Относительный путь из папки и имени файла."""
         return os.path.join(parent, name) if parent else name
 
-    def _emit(
-        self, phase: str, current: int, total: int, message: str = ""
-    ) -> None:
+    def _emit(self, phase: str, current: int, total: int, message: str = "") -> None:
         """Отправляет событие прогресса, если подписчик задан."""
         if self._progress is not None:
             self._progress(ProgressEvent(phase, current, total, message))

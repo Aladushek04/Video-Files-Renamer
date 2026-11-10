@@ -16,7 +16,7 @@ def make_byte_array(base: bytes, mag: int) -> bytes:
 def make_tail_array(base: bytes, tail: bytes) -> bytes:
     """Mirrors Go's makeTailArray: appends a chunk-sized buffer ending with `tail`."""
     buf = bytearray(CHUNK_SIZE)
-    buf[len(buf) - len(tail):] = tail
+    buf[len(buf) - len(tail) :] = tail
     return base + bytes(buf)
 
 

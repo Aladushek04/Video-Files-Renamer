@@ -1,4 +1,5 @@
 """Тесты скрапера студий: пагинация, resume, merge и CLI-коды возврата."""
+
 import json
 
 import pytest
@@ -44,9 +45,7 @@ class FakeClient:
 
 def install_client(monkeypatch, fake):
     """Подменяет StashDBClient, чтобы main не ходил в сеть."""
-    monkeypatch.setattr(
-        scrape_studios, "StashDBClient", lambda *args, **kwargs: fake
-    )
+    monkeypatch.setattr(scrape_studios, "StashDBClient", lambda *args, **kwargs: fake)
 
 
 def read_json(path):
@@ -57,29 +56,27 @@ def read_json(path):
 # normalize / merge
 # ---------------------------------------------------------------------------
 
+
 def test_key_matches_cleaner():
     assert normalize_key("BrazzersExxtra") == "brazzersexxtra"
     assert normalize_key("Hussie Pass") == "hussiepass"
 
 
 def test_merge_keeps_existing_and_reports_collisions():
-    merged, collisions = merge_studios(
-        {"brazzers": "Brazzers"}, ["Brazzers", "Brazzers!"])
+    merged, collisions = merge_studios({"brazzers": "Brazzers"}, ["Brazzers", "Brazzers!"])
     assert merged["brazzers"] == "Brazzers"
     assert collisions["brazzers"] == ["Brazzers!"]
 
 
 def test_merge_adds_new_names_and_preserves_existing_key_spelling():
-    merged, collisions = merge_studios(
-        {"Brazzers Exxtra": "BrazzersExxtra"}, ["Hussie Pass"])
+    merged, collisions = merge_studios({"Brazzers Exxtra": "BrazzersExxtra"}, ["Hussie Pass"])
     assert merged["Brazzers Exxtra"] == "BrazzersExxtra"
     assert merged["hussiepass"] == "Hussie Pass"
     assert collisions == {}
 
 
 def test_merge_treats_existing_name_as_same_value_not_collision():
-    merged, collisions = merge_studios(
-        {"brazzers": "Brazzers"}, ["Brazzers", "Brazzers"])
+    merged, collisions = merge_studios({"brazzers": "Brazzers"}, ["Brazzers", "Brazzers"])
     assert merged == {"brazzers": "Brazzers"}
     assert collisions == {}
 
@@ -94,6 +91,7 @@ def test_merge_skips_blank_names():
 # run_scrape
 # ---------------------------------------------------------------------------
 
+
 def test_paginates_to_count():
     pages = {
         1: ([Studio("1", "A"), Studio("2", "B")], 3),
@@ -103,8 +101,7 @@ def test_paginates_to_count():
     def fetch(client, page, per_page):
         return pages[page]
 
-    report = run_scrape(None, start_page=1, per_page=2, max_pages=None,
-                        fetch=fetch)
+    report = run_scrape(None, start_page=1, per_page=2, max_pages=None, fetch=fetch)
     assert [s.name for s in report.studios] == ["A", "B", "C"]
     assert report.complete is True
     assert report.pages_fetched == 2
@@ -129,11 +126,11 @@ def test_empty_last_page_can_be_accepted_on_count_drift():
         return pages[page]
 
     with pytest.raises(ScraperGapError):
-        run_scrape(None, start_page=1, per_page=1, max_pages=None,
-                   fetch=fetch)
+        run_scrape(None, start_page=1, per_page=1, max_pages=None, fetch=fetch)
 
-    report = run_scrape(None, start_page=1, per_page=1, max_pages=None,
-                        fetch=fetch, allow_empty_tail=True)
+    report = run_scrape(
+        None, start_page=1, per_page=1, max_pages=None, fetch=fetch, allow_empty_tail=True
+    )
     assert report.complete is True
     assert [s.name for s in report.studios] == ["Alpha"]
 
@@ -142,8 +139,7 @@ def test_empty_page_at_zero_count_completes():
     def fetch(client, page, per_page):
         return [], 0
 
-    report = run_scrape(None, start_page=1, per_page=2, max_pages=None,
-                        fetch=fetch)
+    report = run_scrape(None, start_page=1, per_page=2, max_pages=None, fetch=fetch)
     assert report.studios == ()
     assert report.complete is True
     assert report.pages_fetched == 1
@@ -162,8 +158,9 @@ def test_run_scrape_dedupes_ids_and_calls_on_page():
     def on_page(page, page_studios, count):
         seen.append((page, [s.id for s in page_studios], count))
 
-    report = run_scrape(None, start_page=1, per_page=2, max_pages=None,
-                        fetch=fetch, on_page=on_page)
+    report = run_scrape(
+        None, start_page=1, per_page=2, max_pages=None, fetch=fetch, on_page=on_page
+    )
     assert [s.id for s in report.studios] == ["1", "2"]
     assert report.complete is True
     assert seen == [(1, ["1"], 2), (2, ["1", "2"], 2)]
@@ -178,8 +175,7 @@ def test_max_pages_stops_incomplete():
     def fetch(client, page, per_page):
         return pages[page]
 
-    report = run_scrape(None, start_page=1, per_page=2, max_pages=1,
-                        fetch=fetch)
+    report = run_scrape(None, start_page=1, per_page=2, max_pages=1, fetch=fetch)
     assert [s.id for s in report.studios] == ["1"]
     assert report.complete is False
     assert report.pages_fetched == 1
@@ -209,6 +205,7 @@ def test_resume_starts_from_initial_and_next_page():
 # ---------------------------------------------------------------------------
 # checkpoint / raw persistence
 # ---------------------------------------------------------------------------
+
 
 def test_checkpoint_roundtrip(tmp_path):
     p = str(tmp_path / "cp.json")
@@ -247,46 +244,75 @@ def test_raw_roundtrip_and_missing(tmp_path):
 # main
 # ---------------------------------------------------------------------------
 
+
 def test_main_filters_generated_names(tmp_path, monkeypatch):
     monkeypatch.setenv("STASHDB_API_KEY", "key")
-    fake = FakeClient({
-        1: ([
-            Studio("1", "Brazzers"),
-            Studio("2", "000000h (ManyVids)"),
-            Studio("3", "+AddFriends (network)"),
-            Studio("4", "Hussie Pass"),
-        ], 4),
-    })
+    fake = FakeClient(
+        {
+            1: (
+                [
+                    Studio("1", "Brazzers"),
+                    Studio("2", "000000h (ManyVids)"),
+                    Studio("3", "+AddFriends (network)"),
+                    Studio("4", "Hussie Pass"),
+                ],
+                4,
+            ),
+        }
+    )
     install_client(monkeypatch, fake)
     out = tmp_path / "studios.json"
-    code = main([
-        "--out", str(out),
-        "--checkpoint", str(tmp_path / "cp.json"),
-        "--raw", str(tmp_path / "raw.json"),
-        "--per-page", "4", "--delay", "0", "--apply", "--max-pages", "1",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(tmp_path / "cp.json"),
+            "--raw",
+            str(tmp_path / "raw.json"),
+            "--per-page",
+            "4",
+            "--delay",
+            "0",
+            "--apply",
+            "--max-pages",
+            "1",
+        ]
+    )
     assert code == 0
     data = read_json(out)
     assert data["brazzers"] == "Brazzers"
     assert data["hussiepass"] == "Hussie Pass"
-    assert not any("000000" in value or "AddFriends" in value
-                   for value in data.values())
+    assert not any("000000" in value or "AddFriends" in value for value in data.values())
 
 
 def test_main_no_filter_keeps_generated_names(tmp_path, monkeypatch):
     monkeypatch.setenv("STASHDB_API_KEY", "key")
-    fake = FakeClient({
-        1: ([Studio("1", "000000h (ManyVids)")], 1),
-    })
+    fake = FakeClient(
+        {
+            1: ([Studio("1", "000000h (ManyVids)")], 1),
+        }
+    )
     install_client(monkeypatch, fake)
     out = tmp_path / "studios.json"
-    code = main([
-        "--out", str(out),
-        "--checkpoint", str(tmp_path / "cp.json"),
-        "--raw", str(tmp_path / "raw.json"),
-        "--per-page", "1", "--delay", "0", "--apply", "--max-pages", "1",
-        "--no-filter",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(tmp_path / "cp.json"),
+            "--raw",
+            str(tmp_path / "raw.json"),
+            "--per-page",
+            "1",
+            "--delay",
+            "0",
+            "--apply",
+            "--max-pages",
+            "1",
+            "--no-filter",
+        ]
+    )
     assert code == 0
     assert "000000h (ManyVids)" in read_json(out).values()
 
@@ -317,16 +343,23 @@ def test_main_uses_source_endpoint_and_key(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("FANSDB_API_KEY", raising=False)
-    (tmp_path / ".env").write_text("FANSDB_API_KEY=fans-key\n",
-                                   encoding="utf-8")
+    (tmp_path / ".env").write_text("FANSDB_API_KEY=fans-key\n", encoding="utf-8")
     monkeypatch.setattr(scrape_studios, "StashDBClient", FakeClient)
 
-    code = main([
-        "--out", str(tmp_path / "fans.json"),
-        "--checkpoint", str(tmp_path / "cp.json"),
-        "--raw", str(tmp_path / "raw.json"),
-        "--apply", "--max-pages", "1",
-    ], source=FANSDB_SOURCE)
+    code = main(
+        [
+            "--out",
+            str(tmp_path / "fans.json"),
+            "--checkpoint",
+            str(tmp_path / "cp.json"),
+            "--raw",
+            str(tmp_path / "raw.json"),
+            "--apply",
+            "--max-pages",
+            "1",
+        ],
+        source=FANSDB_SOURCE,
+    )
     assert code == 0
     assert seen == {
         "api_key": "fans-key",
@@ -338,8 +371,7 @@ def test_main_uses_source_endpoint_and_key(tmp_path, monkeypatch):
 def test_main_missing_fansdb_key_returns_2(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("FANSDB_API_KEY", raising=False)
-    assert main(["--out", str(tmp_path / "fans.json")],
-                source=FANSDB_SOURCE) == 2
+    assert main(["--out", str(tmp_path / "fans.json")], source=FANSDB_SOURCE) == 2
     assert "FANSDB_API_KEY" in capsys.readouterr().err
 
 
@@ -350,19 +382,31 @@ def test_main_without_key_returns_2(tmp_path, monkeypatch):
 
 def test_main_dry_run_writes_nothing(tmp_path, monkeypatch):
     monkeypatch.setenv("STASHDB_API_KEY", "key")
-    fake = FakeClient({
-        1: ([Studio("1", "A"), Studio("2", "B")], 3),
-        2: ([Studio("3", "C")], 3),
-    })
+    fake = FakeClient(
+        {
+            1: ([Studio("1", "A"), Studio("2", "B")], 3),
+            2: ([Studio("3", "C")], 3),
+        }
+    )
     install_client(monkeypatch, fake)
 
     out = tmp_path / "studios.json"
     cp = tmp_path / "cp.json"
     raw = tmp_path / "raw.json"
-    code = main([
-        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "2", "--delay", "0",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+        ]
+    )
     assert code == 0
     assert fake.calls == [(1, 2), (2, 2)]
     assert not out.exists()
@@ -372,24 +416,35 @@ def test_main_dry_run_writes_nothing(tmp_path, monkeypatch):
     assert not (tmp_path / "studios_collisions.json").exists()
 
 
-def test_main_apply_writes_progress_and_merges_without_overwrite(
-        tmp_path, monkeypatch):
+def test_main_apply_writes_progress_and_merges_without_overwrite(tmp_path, monkeypatch):
     monkeypatch.setenv("STASHDB_API_KEY", "key")
-    fake = FakeClient({
-        1: ([Studio("1", "Brazzers"), Studio("2", "Brazzers!")], 3),
-        2: ([Studio("3", "Hussie Pass")], 3),
-    })
+    fake = FakeClient(
+        {
+            1: ([Studio("1", "Brazzers"), Studio("2", "Brazzers!")], 3),
+            2: ([Studio("3", "Hussie Pass")], 3),
+        }
+    )
     install_client(monkeypatch, fake)
 
     out = tmp_path / "studios.json"
-    out.write_text(json.dumps({"manual": "Manual Studio"}),
-                   encoding="utf-8")
+    out.write_text(json.dumps({"manual": "Manual Studio"}), encoding="utf-8")
     cp = tmp_path / "cp.json"
     raw = tmp_path / "raw.json"
-    code = main([
-        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "2", "--delay", "0", "--apply",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+            "--apply",
+        ]
+    )
 
     assert code == 0
     data = read_json(out)
@@ -409,19 +464,32 @@ def test_main_apply_writes_progress_and_merges_without_overwrite(
 
 def test_main_transient_error_keeps_last_page_progress(tmp_path, monkeypatch):
     monkeypatch.setenv("STASHDB_API_KEY", "key")
-    fake = FakeClient({
-        1: ([Studio("1", "A"), Studio("2", "B")], 3),
-        2: StashDBTransientError("boom"),
-    })
+    fake = FakeClient(
+        {
+            1: ([Studio("1", "A"), Studio("2", "B")], 3),
+            2: StashDBTransientError("boom"),
+        }
+    )
     install_client(monkeypatch, fake)
 
     out = tmp_path / "studios.json"
     cp = tmp_path / "cp.json"
     raw = tmp_path / "raw.json"
-    code = main([
-        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "2", "--delay", "0", "--apply",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+            "--apply",
+        ]
+    )
 
     assert code == 1
     assert [s.id for s in load_raw(str(raw))] == ["1", "2"]
@@ -440,10 +508,21 @@ def test_main_resumes_from_checkpoint_and_raw(tmp_path, monkeypatch):
     save_raw(str(raw), [Studio("1", "Alpha"), Studio("2", "Beta")])
     save_checkpoint(str(cp), Checkpoint(1, 2, 3, False))
 
-    code = main([
-        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "2", "--delay", "0", "--apply",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+            "--apply",
+        ]
+    )
 
     assert code == 0
     assert fake.calls == [(2, 2)]
@@ -452,8 +531,7 @@ def test_main_resumes_from_checkpoint_and_raw(tmp_path, monkeypatch):
     assert load_checkpoint(str(cp)) == Checkpoint(2, 2, 3, True)
 
 
-def test_main_incomplete_checkpoint_without_raw_returns_2(
-        tmp_path, monkeypatch, capsys):
+def test_main_incomplete_checkpoint_without_raw_returns_2(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("STASHDB_API_KEY", "key")
     fake = FakeClient({2: ([Studio("3", "C")], 1)})
     install_client(monkeypatch, fake)
@@ -463,10 +541,21 @@ def test_main_incomplete_checkpoint_without_raw_returns_2(
     raw = tmp_path / "raw.json"
     save_checkpoint(str(cp), Checkpoint(1, 2, 3, False))
 
-    code = main([
-        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "2", "--delay", "0", "--apply",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+            "--apply",
+        ]
+    )
 
     assert code == 2
     error = capsys.readouterr().err
@@ -478,23 +567,32 @@ def test_main_incomplete_checkpoint_without_raw_returns_2(
     assert load_checkpoint(str(cp)) == Checkpoint(1, 2, 3, False)
 
 
-def test_main_complete_checkpoint_without_raw_returns_2(
-        tmp_path, monkeypatch, capsys):
+def test_main_complete_checkpoint_without_raw_returns_2(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("STASHDB_API_KEY", "key")
     fake = FakeClient({})
     install_client(monkeypatch, fake)
 
     out = tmp_path / "studios.json"
-    out.write_text(json.dumps({"manual": "Manual Studio"}),
-                   encoding="utf-8")
+    out.write_text(json.dumps({"manual": "Manual Studio"}), encoding="utf-8")
     cp = tmp_path / "cp.json"
     raw = tmp_path / "raw.json"
     save_checkpoint(str(cp), Checkpoint(1, 2, 3, True))
 
-    code = main([
-        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "2", "--delay", "0", "--apply",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+            "--apply",
+        ]
+    )
 
     assert code == 2
     assert "--reset" in capsys.readouterr().err
@@ -504,8 +602,7 @@ def test_main_complete_checkpoint_without_raw_returns_2(
     assert not (tmp_path / "studios_collisions.json").exists()
 
 
-def test_main_incomplete_checkpoint_with_empty_raw_returns_2(
-        tmp_path, monkeypatch, capsys):
+def test_main_incomplete_checkpoint_with_empty_raw_returns_2(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("STASHDB_API_KEY", "key")
     fake = FakeClient({2: ([Studio("3", "C")], 1)})
     install_client(monkeypatch, fake)
@@ -516,10 +613,21 @@ def test_main_incomplete_checkpoint_with_empty_raw_returns_2(
     save_raw(str(raw), [])
     save_checkpoint(str(cp), Checkpoint(1, 2, 3, False))
 
-    code = main([
-        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "2", "--delay", "0", "--apply",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+            "--apply",
+        ]
+    )
 
     assert code == 2
     assert "--reset" in capsys.readouterr().err
@@ -538,10 +646,21 @@ def test_main_per_page_mismatch_requires_reset(tmp_path, monkeypatch, capsys):
     raw = tmp_path / "raw.json"
     save_checkpoint(str(cp), Checkpoint(1, 50, 500, False))
 
-    code = main([
-        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "100", "--delay", "0", "--apply",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "100",
+            "--delay",
+            "0",
+            "--apply",
+        ]
+    )
 
     assert code == 2
     assert "--reset" in capsys.readouterr().err
@@ -561,10 +680,22 @@ def test_main_reset_with_apply_starts_at_page_one(tmp_path, monkeypatch):
     save_raw(str(raw), [Studio("9", "Old")])
     save_checkpoint(str(cp), Checkpoint(5, 50, 10, False))
 
-    code = main([
-        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "2", "--delay", "0", "--apply", "--reset",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+            "--apply",
+            "--reset",
+        ]
+    )
 
     assert code == 0
     assert fake.calls == [(1, 2)]
@@ -584,10 +715,21 @@ def test_main_reset_without_apply_is_read_only(tmp_path, monkeypatch):
     save_raw(str(raw), [Studio("9", "Old")])
     save_checkpoint(str(cp), Checkpoint(5, 50, 10, False))
 
-    code = main([
-        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "2", "--delay", "0", "--reset",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+            "--reset",
+        ]
+    )
 
     assert code == 0
     assert fake.calls == [(1, 2)]
@@ -596,8 +738,7 @@ def test_main_reset_without_apply_is_read_only(tmp_path, monkeypatch):
     assert not out.exists()
 
 
-def test_main_complete_checkpoint_skips_network_and_merges_raw(
-        tmp_path, monkeypatch):
+def test_main_complete_checkpoint_skips_network_and_merges_raw(tmp_path, monkeypatch):
     monkeypatch.setenv("STASHDB_API_KEY", "key")
     fake = FakeClient({})
     install_client(monkeypatch, fake)
@@ -608,10 +749,21 @@ def test_main_complete_checkpoint_skips_network_and_merges_raw(
     save_raw(str(raw), [Studio("1", "Alpha")])
     save_checkpoint(str(cp), Checkpoint(1, 2, 1, True))
 
-    code = main([
-        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "2", "--delay", "0", "--apply",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+            "--apply",
+        ]
+    )
 
     assert code == 0
     assert fake.calls == []
@@ -626,10 +778,21 @@ def test_main_auth_error_returns_2_without_writes(tmp_path, monkeypatch):
     out = tmp_path / "studios.json"
     cp = tmp_path / "cp.json"
     raw = tmp_path / "raw.json"
-    code = main([
-        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "2", "--delay", "0", "--apply",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+            "--apply",
+        ]
+    )
 
     assert code == 2
     assert not out.exists()
@@ -645,12 +808,21 @@ def test_main_malformed_checkpoint_returns_2(tmp_path, monkeypatch, capsys):
     cp = tmp_path / "cp.json"
     cp.write_text("{not json", encoding="utf-8")
 
-    code = main([
-        "--out", str(tmp_path / "studios.json"),
-        "--checkpoint", str(cp),
-        "--raw", str(tmp_path / "raw.json"),
-        "--per-page", "2", "--delay", "0", "--apply",
-    ])
+    code = main(
+        [
+            "--out",
+            str(tmp_path / "studios.json"),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(tmp_path / "raw.json"),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+            "--apply",
+        ]
+    )
 
     assert code == 2
     assert fake.calls == []
@@ -659,19 +831,32 @@ def test_main_malformed_checkpoint_returns_2(tmp_path, monkeypatch, capsys):
 
 def test_main_gap_does_not_advance_checkpoint(tmp_path, monkeypatch):
     monkeypatch.setenv("STASHDB_API_KEY", "key")
-    fake = FakeClient({
-        1: ([Studio("1", "A")], 3),
-        2: ([], 3),
-    })
+    fake = FakeClient(
+        {
+            1: ([Studio("1", "A")], 3),
+            2: ([], 3),
+        }
+    )
     install_client(monkeypatch, fake)
 
     out = tmp_path / "studios.json"
     cp = tmp_path / "cp.json"
     raw = tmp_path / "raw.json"
-    code = main([
-        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "2", "--delay", "0", "--apply",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+            "--apply",
+        ]
+    )
 
     assert code == 2
     assert [s.id for s in load_raw(str(raw))] == ["1"]
@@ -687,10 +872,23 @@ def test_main_max_pages_applies_partial_progress(tmp_path, monkeypatch):
     out = tmp_path / "studios.json"
     cp = tmp_path / "cp.json"
     raw = tmp_path / "raw.json"
-    code = main([
-        "--out", str(out), "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "2", "--delay", "0", "--max-pages", "1", "--apply",
-    ])
+    code = main(
+        [
+            "--out",
+            str(out),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+            "--max-pages",
+            "1",
+            "--apply",
+        ]
+    )
 
     assert code == 0
     assert fake.calls == [(1, 2)]
@@ -713,11 +911,22 @@ def test_main_reset_delete_error_returns_2(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(scrape_studios.os, "remove", locked)
 
-    code = main([
-        "--out", str(tmp_path / "studios.json"),
-        "--checkpoint", str(cp), "--raw", str(raw),
-        "--per-page", "2", "--delay", "0", "--apply", "--reset",
-    ])
+    code = main(
+        [
+            "--out",
+            str(tmp_path / "studios.json"),
+            "--checkpoint",
+            str(cp),
+            "--raw",
+            str(raw),
+            "--per-page",
+            "2",
+            "--delay",
+            "0",
+            "--apply",
+            "--reset",
+        ]
+    )
 
     assert code == 2
     assert fake.calls == []

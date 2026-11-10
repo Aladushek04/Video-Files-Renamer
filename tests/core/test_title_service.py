@@ -23,8 +23,13 @@ from video_renamer.core.title_service import (
 )
 
 
-def scene(title="Poking Glory", studio="BrazzersExxtra", date="2026-10-03",
-          performers=("Ryan Reid",), scene_id="s1"):
+def scene(
+    title="Poking Glory",
+    studio="BrazzersExxtra",
+    date="2026-10-03",
+    performers=("Ryan Reid",),
+    scene_id="s1",
+):
     return Scene(
         scene_id,
         title,
@@ -33,8 +38,7 @@ def scene(title="Poking Glory", studio="BrazzersExxtra", date="2026-10-03",
         None,
         1200,
         Studio("st", studio) if studio else None,
-        tuple(Performer(f"p{index}", name)
-              for index, name in enumerate(performers)),
+        tuple(Performer(f"p{index}", name) for index, name in enumerate(performers)),
     )
 
 
@@ -90,8 +94,15 @@ class FakeCache:
 
 
 class FakeClient:
-    def __init__(self, by_hash=None, text=None, hash_error=None,
-                 text_error=None, phash_by_hash=None, phash_error=None):
+    def __init__(
+        self,
+        by_hash=None,
+        text=None,
+        hash_error=None,
+        text_error=None,
+        phash_by_hash=None,
+        phash_error=None,
+    ):
         self.by_hash = by_hash
         self.text = list(text or [])
         self.hash_error = hash_error
@@ -140,8 +151,12 @@ def test_fingerprint_single_merged_scene_is_approved(tmp_path):
     stash = FakeClient(by_hash={"h": [scene(scene_id="a")]})
     porn = FakeClient(by_hash={"h": [scene(scene_id="b")]})
     report = TitleService(
-        str(tmp_path), {}, FakeCache(), stash,
-        oshash_func=lambda path: "h", extra_clients={"ThePornDB": porn},
+        str(tmp_path),
+        {},
+        FakeCache(),
+        stash,
+        oshash_func=lambda path: "h",
+        extra_clients={"ThePornDB": porn},
     ).preview()
 
     row = report.rows[0]
@@ -156,8 +171,12 @@ def test_secondary_scene_source_is_recorded_in_cache(tmp_path):
     stash = FakeClient(by_hash={"h": []})
     porn = FakeClient(by_hash={"h": [scene(scene_id="p")]})
     TitleService(
-        str(tmp_path), {}, cache, stash,
-        oshash_func=lambda path: "h", extra_clients={"ThePornDB": porn},
+        str(tmp_path),
+        {},
+        cache,
+        stash,
+        oshash_func=lambda path: "h",
+        extra_clients={"ThePornDB": porn},
     ).preview()
 
     stored = cache.get_source_fingerprint("ThePornDB", "OSHASH", "h")
@@ -168,11 +187,14 @@ def test_secondary_scene_source_is_recorded_in_cache(tmp_path):
 def test_secondary_source_auth_error_is_warning(tmp_path):
     write(tmp_path / NAMED_FILE)
     stash = FakeClient(by_hash={"h": [scene()]})
-    porn = FakeClient(hash_error=StashDBAuthError(
-        "StashDB rejected the API key (HTTP 401)"))
+    porn = FakeClient(hash_error=StashDBAuthError("StashDB rejected the API key (HTTP 401)"))
     report = TitleService(
-        str(tmp_path), {}, FakeCache(), stash,
-        oshash_func=lambda path: "h", extra_clients={"ThePornDB": porn},
+        str(tmp_path),
+        {},
+        FakeCache(),
+        stash,
+        oshash_func=lambda path: "h",
+        extra_clients={"ThePornDB": porn},
     ).preview()
 
     assert report.rows[0].scene_id == "s1"
@@ -188,8 +210,12 @@ def test_secondary_transient_error_marks_row(tmp_path):
     stash = FakeClient(by_hash={"h": []})
     fans = FakeClient(hash_error=StashDBTransientError("timeout"))
     report = TitleService(
-        str(tmp_path), {}, FakeCache(), stash,
-        oshash_func=lambda path: "h", extra_clients={"FansDB": fans},
+        str(tmp_path),
+        {},
+        FakeCache(),
+        stash,
+        oshash_func=lambda path: "h",
+        extra_clients={"FansDB": fans},
     ).preview()
 
     assert "FansDB_error" in report.rows[0].note
@@ -206,8 +232,13 @@ def test_phash_runs_only_without_oshash_match(tmp_path):
 
     stash = FakeClient(by_hash={"h": [scene()]})
     TitleService(
-        str(tmp_path), {}, FakeCache(), stash,
-        oshash_func=lambda path: "h", phash=True, phash_func=hasher,
+        str(tmp_path),
+        {},
+        FakeCache(),
+        stash,
+        oshash_func=lambda path: "h",
+        phash=True,
+        phash_func=hasher,
     ).preview()
 
     assert calls == []
@@ -220,8 +251,12 @@ def test_phash_match_is_never_approved(tmp_path):
         phash_by_hash={"dc75c0f03795438e": [scene(scene_id="p")]},
     )
     report = TitleService(
-        str(tmp_path), {}, FakeCache(), stash,
-        oshash_func=lambda path: "h", phash=True,
+        str(tmp_path),
+        {},
+        FakeCache(),
+        stash,
+        oshash_func=lambda path: "h",
+        phash=True,
         phash_func=lambda path: "dc75c0f03795438e",
     ).preview()
 
@@ -239,8 +274,13 @@ def test_phash_error_per_file_does_not_stop_preview(tmp_path):
         raise PhashError("ffmpeg returned no frame")
 
     report = TitleService(
-        str(tmp_path), {}, FakeCache(), FakeClient(by_hash={}),
-        oshash_func=lambda path: "h", phash=True, phash_func=broken,
+        str(tmp_path),
+        {},
+        FakeCache(),
+        FakeClient(by_hash={}),
+        oshash_func=lambda path: "h",
+        phash=True,
+        phash_func=broken,
     ).preview()
 
     assert len(report.rows) == 2
@@ -258,8 +298,13 @@ def test_phash_local_cache_avoids_recomputation(tmp_path):
     cache = FakeCache()
     for _ in range(2):
         TitleService(
-            str(tmp_path), {}, cache, FakeClient(by_hash={"h": []}),
-            oshash_func=lambda path: "h", phash=True, phash_func=hasher,
+            str(tmp_path),
+            {},
+            cache,
+            FakeClient(by_hash={"h": []}),
+            oshash_func=lambda path: "h",
+            phash=True,
+            phash_func=hasher,
         ).preview()
 
     assert len(calls) == 1
@@ -273,8 +318,13 @@ def test_phash_tool_error_propagates(tmp_path):
 
     with pytest.raises(PhashToolError):
         TitleService(
-            str(tmp_path), {}, FakeCache(), FakeClient(by_hash={"h": []}),
-            oshash_func=lambda path: "h", phash=True, phash_func=missing,
+            str(tmp_path),
+            {},
+            FakeCache(),
+            FakeClient(by_hash={"h": []}),
+            oshash_func=lambda path: "h",
+            phash=True,
+            phash_func=missing,
         ).preview()
 
 
@@ -284,8 +334,12 @@ def test_offline_reads_secondary_cache_without_network(tmp_path):
     cache.put_source_fingerprint("ThePornDB", "OSHASH", "h", [scene(scene_id="p")])
     porn = FakeClient(hash_error=StashDBTransientError("should not be called"))
     report = TitleService(
-        str(tmp_path), {}, cache, FakeClient(by_hash={"h": []}),
-        oshash_func=lambda path: "h", extra_clients={"ThePornDB": porn},
+        str(tmp_path),
+        {},
+        cache,
+        FakeClient(by_hash={"h": []}),
+        oshash_func=lambda path: "h",
+        extra_clients={"ThePornDB": porn},
         offline=True,
     ).preview()
 
@@ -303,8 +357,7 @@ def test_iter_video_files_filters_extensions_and_temp_names(tmp_path):
     write(tmp_path / "__ren_tmp_5.mp4")
     (tmp_path / "folder.mp4").mkdir()
 
-    names = {Path(path).name
-             for path in iter_video_files(str(tmp_path), False)}
+    names = {Path(path).name for path in iter_video_files(str(tmp_path), False)}
     assert names == {"a.mp4", "B.MKV"}
 
 
@@ -346,8 +399,7 @@ def test_iter_video_files_skips_symlinked_files(tmp_path):
     except (OSError, NotImplementedError):
         pytest.skip("symlinks are not available")
 
-    names = {Path(path).name
-             for path in iter_video_files(str(tmp_path), False)}
+    names = {Path(path).name for path in iter_video_files(str(tmp_path), False)}
     assert names == {"real.mp4"}
 
 
@@ -358,7 +410,10 @@ def test_preview_marks_unique_fingerprint_approved(tmp_path):
     name = "brazzersexxtra 26.10.03 ryan reid poking glory.mp4"
     write(tmp_path / name)
     service = TitleService(
-        str(tmp_path), {}, FakeCache(), FakeClient(),
+        str(tmp_path),
+        {},
+        FakeCache(),
+        FakeClient(),
         oshash_func=lambda path: "abc123",
     )
 
@@ -386,7 +441,11 @@ def test_fingerprints_are_batched_once_and_negative_results_cached(tmp_path):
     hashes = {"a.mp4": "h1", "b.mp4": "h2", "c.mp4": "h3"}
 
     report = TitleService(
-        str(tmp_path), {}, cache, client, oshash_func=by_name(hashes),
+        str(tmp_path),
+        {},
+        cache,
+        client,
+        oshash_func=by_name(hashes),
     ).preview()
 
     assert len(report.rows) == 3
@@ -400,14 +459,22 @@ def test_second_preview_reuses_cached_negative_results(tmp_path):
     cache = FakeCache()
     first_client = FakeClient(by_hash={"h": []})
     service = TitleService(
-        str(tmp_path), {}, cache, first_client, oshash_func=lambda path: "h",
+        str(tmp_path),
+        {},
+        cache,
+        first_client,
+        oshash_func=lambda path: "h",
     )
     service.preview()
     assert first_client.hash_calls == [["h"]]
 
     second_client = FakeClient(by_hash={"h": [SCENE]})
     report = TitleService(
-        str(tmp_path), {}, cache, second_client, oshash_func=lambda path: "h",
+        str(tmp_path),
+        {},
+        cache,
+        second_client,
+        oshash_func=lambda path: "h",
     ).preview()
 
     assert second_client.hash_calls == []
@@ -420,7 +487,11 @@ def test_refresh_ignores_cached_fingerprints(tmp_path):
     client = FakeClient(by_hash={"h": [SCENE]})
 
     report = TitleService(
-        str(tmp_path), {}, cache, client, refresh=True,
+        str(tmp_path),
+        {},
+        cache,
+        client,
+        refresh=True,
         oshash_func=lambda path: "h",
     ).preview()
 
@@ -435,7 +506,11 @@ def test_fingerprint_transient_error_is_a_warning_and_not_cached(tmp_path):
     client = FakeClient(hash_error=StashDBTransientError("network down"))
 
     report = TitleService(
-        str(tmp_path), {}, cache, client, oshash_func=lambda path: "h",
+        str(tmp_path),
+        {},
+        cache,
+        client,
+        oshash_func=lambda path: "h",
     ).preview()
 
     assert report.had_transient_errors is True
@@ -446,14 +521,20 @@ def test_fingerprint_transient_error_is_a_warning_and_not_cached(tmp_path):
     assert "stashdb_error" in report.rows[0].note
 
 
-@pytest.mark.parametrize("error", [
-    StashDBAuthError("bad key"),
-    StashDBQueryError("bad query"),
-])
+@pytest.mark.parametrize(
+    "error",
+    [
+        StashDBAuthError("bad key"),
+        StashDBQueryError("bad query"),
+    ],
+)
 def test_fatal_stashdb_errors_propagate(tmp_path, error):
     write(tmp_path / "a.mp4")
     service = TitleService(
-        str(tmp_path), {}, FakeCache(), FakeClient(hash_error=error),
+        str(tmp_path),
+        {},
+        FakeCache(),
+        FakeClient(hash_error=error),
         oshash_func=lambda path: "h",
     )
 
@@ -471,7 +552,11 @@ def test_text_search_is_used_when_fingerprint_is_empty(tmp_path):
     client = FakeClient(by_hash={"h": []}, text=[TEXT_SCENE])
 
     report = TitleService(
-        str(tmp_path), {}, cache, client, oshash_func=lambda path: "h",
+        str(tmp_path),
+        {},
+        cache,
+        client,
+        oshash_func=lambda path: "h",
     ).preview()
 
     assert client.hash_calls == [["h"]]
@@ -487,15 +572,11 @@ def test_text_search_is_used_when_fingerprint_is_empty(tmp_path):
 def test_build_alternative_uses_scene_and_approves(tmp_path):
     (tmp_path / "old.mp4").write_bytes(b"abc")
     service = TitleService(str(tmp_path), {}, None, None)
-    row = PreviewRow(
-        False, "old.mp4", "old.mp4", "heuristic", 0.0, "", "no match", "h", 3
-    )
+    row = PreviewRow(False, "old.mp4", "old.mp4", "heuristic", 0.0, "", "no match", "h", 3)
     alternative = scene(title="New Title", scene_id="alt")
     updated = service.build_alternative(row, alternative, [row])
     assert updated.scene_id == "alt"
-    assert updated.new_rel == (
-        "BrazzersExxtra - 03.10.2026 - Ryan Reid - New Title.mp4"
-    )
+    assert updated.new_rel == ("BrazzersExxtra - 03.10.2026 - Ryan Reid - New Title.mp4")
     assert updated.approved is True
     assert updated.source == "text"
 
@@ -508,7 +589,11 @@ def test_offline_text_search_uses_cache_without_network(tmp_path):
     client = FakeClient(by_hash={"h": [SCENE]}, text=[SCENE])
 
     report = TitleService(
-        str(tmp_path), {}, cache, client, offline=True,
+        str(tmp_path),
+        {},
+        cache,
+        client,
+        offline=True,
         oshash_func=lambda path: "h",
     ).preview()
 
@@ -524,7 +609,11 @@ def test_offline_without_cache_uses_heuristic_only(tmp_path):
     client = FakeClient(by_hash={"h": [SCENE]}, text=[SCENE])
 
     report = TitleService(
-        str(tmp_path), {}, FakeCache(), client, offline=True,
+        str(tmp_path),
+        {},
+        FakeCache(),
+        client,
+        offline=True,
         oshash_func=lambda path: "h",
     ).preview()
 
@@ -539,7 +628,11 @@ def test_no_text_search_skips_network_and_cache(tmp_path):
     client = FakeClient(text=[SCENE])
 
     report = TitleService(
-        str(tmp_path), {}, cache, client, text_search=False,
+        str(tmp_path),
+        {},
+        cache,
+        client,
+        text_search=False,
         oshash_func=lambda path: "h",
     ).preview()
 
@@ -554,7 +647,11 @@ def test_text_transient_error_marks_row_and_is_not_cached(tmp_path):
     client = FakeClient(text_error=StashDBTransientError("timeout"))
 
     report = TitleService(
-        str(tmp_path), {}, cache, client, oshash_func=lambda path: "h",
+        str(tmp_path),
+        {},
+        cache,
+        client,
+        oshash_func=lambda path: "h",
     ).preview()
 
     assert report.had_transient_errors is True
@@ -567,12 +664,14 @@ def test_text_transient_error_marks_row_and_is_not_cached(tmp_path):
 
 
 def test_already_correct_name_is_marked_unchanged(tmp_path):
-    name = ("BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory.mp4")
+    name = "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory.mp4"
     write(tmp_path / name)
     studios = {"brazzersexxtra": "BrazzersExxtra"}
 
     report = TitleService(
-        str(tmp_path), studios, FakeCache({"h": [SCENE]}),
+        str(tmp_path),
+        studios,
+        FakeCache({"h": [SCENE]}),
         oshash_func=lambda path: "h",
     ).preview()
 
@@ -588,15 +687,16 @@ def test_collision_inside_batch_gets_numeric_suffix(tmp_path):
     write(tmp_path / "b 26.10.03 ryan reid poking glory.mp4")
 
     report = TitleService(
-        str(tmp_path), {}, FakeCache({"h": [SCENE]}), FakeClient(),
+        str(tmp_path),
+        {},
+        FakeCache({"h": [SCENE]}),
+        FakeClient(),
         oshash_func=lambda path: "h",
     ).preview()
 
     names = [Path(row.new_rel).name for row in report.rows]
-    assert names[0] == \
-        "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory.mp4"
-    assert names[1] == \
-        "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory (2).mp4"
+    assert names[0] == "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory.mp4"
+    assert names[1] == "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory (2).mp4"
     assert "collision" in report.rows[1].note
 
 
@@ -607,13 +707,19 @@ def test_existing_target_outside_batch_is_occupied(tmp_path):
     write(tmp_path / source)
 
     report = TitleService(
-        str(tmp_path), {}, FakeCache({"h": [SCENE]}), FakeClient(),
-        limit=1, oshash_func=lambda path: "h",
+        str(tmp_path),
+        {},
+        FakeCache({"h": [SCENE]}),
+        FakeClient(),
+        limit=1,
+        oshash_func=lambda path: "h",
     ).preview()
 
     assert len(report.rows) == 1
-    assert Path(report.rows[0].new_rel).name == \
-        "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory (2).mp4"
+    assert (
+        Path(report.rows[0].new_rel).name
+        == "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory (2).mp4"
+    )
 
 
 def test_target_that_is_itself_renamed_is_not_occupied(tmp_path):
@@ -622,11 +728,14 @@ def test_target_that_is_itself_renamed_is_not_occupied(tmp_path):
     write(tmp_path / first)
     write(tmp_path / second)
     hashes = {first: "h1", second: "h2"}
-    cache = FakeCache({"h1": [SCENE],
-                       "h2": [scene(title="Second Title")]})
+    cache = FakeCache({"h1": [SCENE], "h2": [scene(title="Second Title")]})
 
     report = TitleService(
-        str(tmp_path), {}, cache, FakeClient(), oshash_func=by_name(hashes),
+        str(tmp_path),
+        {},
+        cache,
+        FakeClient(),
+        oshash_func=by_name(hashes),
     ).preview()
 
     first_row, second_row = report.rows
@@ -645,8 +754,12 @@ def test_limit_truncates_files_before_hashing(tmp_path):
         return "h"
 
     report = TitleService(
-        str(tmp_path), {}, FakeCache({"h": [SCENE]}), FakeClient(),
-        limit=2, oshash_func=hasher,
+        str(tmp_path),
+        {},
+        FakeCache({"h": [SCENE]}),
+        FakeClient(),
+        limit=2,
+        oshash_func=hasher,
     ).preview()
 
     assert hashed == ["a.mp4", "b.mp4"]
@@ -661,8 +774,12 @@ def test_progress_events_cover_all_phases(tmp_path):
     events = []
 
     TitleService(
-        str(tmp_path), {}, FakeCache({"h": [SCENE]}), FakeClient(),
-        oshash_func=lambda path: "h", progress=events.append,
+        str(tmp_path),
+        {},
+        FakeCache({"h": [SCENE]}),
+        FakeClient(),
+        oshash_func=lambda path: "h",
+        progress=events.append,
     ).preview()
 
     phases = [event.phase for event in events]
@@ -683,8 +800,11 @@ def test_progress_reports_text_search(tmp_path):
     events = []
 
     TitleService(
-        str(tmp_path), {}, FakeCache({"h": []}),
-        FakeClient(text=[TEXT_SCENE]), oshash_func=lambda path: "h",
+        str(tmp_path),
+        {},
+        FakeCache({"h": []}),
+        FakeClient(text=[TEXT_SCENE]),
+        oshash_func=lambda path: "h",
         progress=events.append,
     ).preview()
 
@@ -698,7 +818,10 @@ def test_progress_reports_text_search(tmp_path):
 def test_preview_prints_nothing(tmp_path, capsys):
     write(tmp_path / "a.mp4")
     TitleService(
-        str(tmp_path), {}, FakeCache({"h": [SCENE]}), FakeClient(),
+        str(tmp_path),
+        {},
+        FakeCache({"h": [SCENE]}),
+        FakeClient(),
         oshash_func=lambda path: "h",
     ).preview()
 
@@ -710,7 +833,10 @@ def test_preview_prints_nothing(tmp_path, capsys):
 def test_preview_returns_immutable_report(tmp_path):
     write(tmp_path / "a.mp4")
     report = TitleService(
-        str(tmp_path), {}, FakeCache({"h": [SCENE]}), FakeClient(),
+        str(tmp_path),
+        {},
+        FakeCache({"h": [SCENE]}),
+        FakeClient(),
         oshash_func=lambda path: "h",
     ).preview()
 
@@ -726,37 +852,38 @@ def test_nested_paths_keep_their_relative_directory(tmp_path):
     write(sub / "a 26.10.03 ryan reid poking glory.mp4")
 
     report = TitleService(
-        str(tmp_path), {}, FakeCache({"h": [SCENE]}), FakeClient(),
-        recursive=True, oshash_func=lambda path: "h",
+        str(tmp_path),
+        {},
+        FakeCache({"h": [SCENE]}),
+        FakeClient(),
+        recursive=True,
+        oshash_func=lambda path: "h",
     ).preview()
 
     row = report.rows[0]
-    assert row.old_rel == os.path.join(
-        "sub", "a 26.10.03 ryan reid poking glory.mp4")
+    assert row.old_rel == os.path.join("sub", "a 26.10.03 ryan reid poking glory.mp4")
     assert row.new_rel == os.path.join(
-        "sub", "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory.mp4")
+        "sub", "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory.mp4"
+    )
 
 
 # --- apply ------------------------------------------------------------------
 
 
 def row(old, new, approved=True, oshash="h", size=3):
-    return PreviewRow(approved, old, new, "fingerprint", 1.0, "s", "",
-                      oshash, size)
+    return PreviewRow(approved, old, new, "fingerprint", 1.0, "s", "", oshash, size)
 
 
 def apply_service(tmp_path, hasher=None):
-    return TitleService(str(tmp_path), {}, None, None,
-                        oshash_func=hasher or (lambda path: "h"))
+    return TitleService(str(tmp_path), {}, None, None, oshash_func=hasher or (lambda path: "h"))
 
 
 def test_apply_renames_approved_and_skips_rest(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"abc")
-    service = TitleService(str(tmp_path), {}, None, None,
-                           oshash_func=lambda p: "h")
+    service = TitleService(str(tmp_path), {}, None, None, oshash_func=lambda p: "h")
     report = service.apply_rows(
-        [row("a.mp4", "b.mp4"), row("a.mp4", "c.mp4", approved=False)],
-        dry_run=False)
+        [row("a.mp4", "b.mp4"), row("a.mp4", "c.mp4", approved=False)], dry_run=False
+    )
     assert (tmp_path / "b.mp4").exists()
     assert report.results[1].status == "skipped"
 
@@ -766,9 +893,12 @@ def test_apply_keeps_file_in_same_subdirectory(tmp_path):
     sub.mkdir()
     (sub / "a.mp4").write_bytes(b"abc")
 
-    report = apply_service(tmp_path).apply_rows([
-        row(os.path.join("sub", "a.mp4"), os.path.join("sub", "b.mp4")),
-    ], dry_run=False)
+    report = apply_service(tmp_path).apply_rows(
+        [
+            row(os.path.join("sub", "a.mp4"), os.path.join("sub", "b.mp4")),
+        ],
+        dry_run=False,
+    )
 
     assert report.had_errors is False
     assert (sub / "b.mp4").exists()
@@ -781,10 +911,12 @@ def test_apply_rejects_moving_to_another_subdirectory(tmp_path):
     second.mkdir()
     (first / "a.mp4").write_bytes(b"abc")
 
-    report = apply_service(tmp_path).apply_rows([
-        row(os.path.join("first", "a.mp4"),
-            os.path.join("second", "b.mp4")),
-    ], dry_run=False)
+    report = apply_service(tmp_path).apply_rows(
+        [
+            row(os.path.join("first", "a.mp4"), os.path.join("second", "b.mp4")),
+        ],
+        dry_run=False,
+    )
 
     assert report.had_errors is True
     assert (first / "a.mp4").exists()
@@ -793,8 +925,7 @@ def test_apply_rejects_moving_to_another_subdirectory(tmp_path):
 
 def test_apply_rejects_path_traversal(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"abc")
-    service = TitleService(str(tmp_path), {}, None, None,
-                           oshash_func=lambda p: "h")
+    service = TitleService(str(tmp_path), {}, None, None, oshash_func=lambda p: "h")
     report = service.apply_rows([row("a.mp4", "..\\evil.mp4")], dry_run=False)
     assert report.had_errors is True
     assert not (tmp_path.parent / "evil.mp4").exists()
@@ -803,18 +934,15 @@ def test_apply_rejects_path_traversal(tmp_path):
 def test_apply_handles_rename_chain_and_upper_extension(tmp_path):
     (tmp_path / "a.MP4").write_bytes(b"abc")
     (tmp_path / "b.MP4").write_bytes(b"abc")
-    service = TitleService(str(tmp_path), {}, None, None,
-                           oshash_func=lambda p: "h")
-    report = service.apply_rows(
-        [row("a.MP4", "b.MP4"), row("b.MP4", "c.MP4")], dry_run=False)
+    service = TitleService(str(tmp_path), {}, None, None, oshash_func=lambda p: "h")
+    report = service.apply_rows([row("a.MP4", "b.MP4"), row("b.MP4", "c.MP4")], dry_run=False)
     assert report.had_errors is False
     assert (tmp_path / "b.MP4").exists() and (tmp_path / "c.MP4").exists()
 
 
 def test_apply_rejects_reserved_name(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"abc")
-    service = TitleService(str(tmp_path), {}, None, None,
-                           oshash_func=lambda p: "h")
+    service = TitleService(str(tmp_path), {}, None, None, oshash_func=lambda p: "h")
     report = service.apply_rows([row("a.mp4", "CON.mp4")], dry_run=False)
     assert report.had_errors is True
 
@@ -823,9 +951,12 @@ def test_apply_skips_unapproved_before_any_validation(tmp_path):
     def unexpected_hash(path):
         raise AssertionError("unapproved rows must not be hashed")
 
-    report = apply_service(tmp_path, unexpected_hash).apply_rows([
-        row(str(tmp_path / "missing.mp4"), "..\\evil.mp4", approved=False),
-    ], dry_run=False)
+    report = apply_service(tmp_path, unexpected_hash).apply_rows(
+        [
+            row(str(tmp_path / "missing.mp4"), "..\\evil.mp4", approved=False),
+        ],
+        dry_run=False,
+    )
 
     assert report.had_errors is False
     assert report.results[0].status == "skipped"
@@ -839,12 +970,15 @@ def test_apply_rejects_absolute_paths_old_traversal_and_new_subdirs(tmp_path):
     outside.write_bytes(b"abc")
     service = apply_service(root)
 
-    report = service.apply_rows([
-        row("../outside.mp4", "renamed.mp4"),
-        row(str(outside), "other.mp4"),
-        row("a.mp4", str(tmp_path / "absolute.mp4")),
-        row("a.mp4", "sub/new.mp4"),
-    ], dry_run=False)
+    report = service.apply_rows(
+        [
+            row("../outside.mp4", "renamed.mp4"),
+            row(str(outside), "other.mp4"),
+            row("a.mp4", str(tmp_path / "absolute.mp4")),
+            row("a.mp4", "sub/new.mp4"),
+        ],
+        dry_run=False,
+    )
 
     assert [result.status for result in report.results] == ["error"] * 4
     assert outside.read_bytes() == b"abc"
@@ -853,8 +987,7 @@ def test_apply_rejects_absolute_paths_old_traversal_and_new_subdirs(tmp_path):
 
 def test_apply_rejects_non_regular_old_file(tmp_path):
     (tmp_path / "folder.mp4").mkdir()
-    report = apply_service(tmp_path).apply_rows(
-        [row("folder.mp4", "new.mp4")], dry_run=False)
+    report = apply_service(tmp_path).apply_rows([row("folder.mp4", "new.mp4")], dry_run=False)
     assert report.results[0].status == "error"
     assert (tmp_path / "folder.mp4").is_dir()
 
@@ -868,8 +1001,7 @@ def test_apply_rejects_symlinked_old_file(tmp_path):
     except (OSError, NotImplementedError):
         pytest.skip("symlinks are not available")
 
-    report = apply_service(tmp_path).apply_rows(
-        [row("alias.mp4", "new.mp4")], dry_run=False)
+    report = apply_service(tmp_path).apply_rows([row("alias.mp4", "new.mp4")], dry_run=False)
 
     assert report.results[0].status == "error"
     assert real.read_bytes() == b"abc"
@@ -878,10 +1010,13 @@ def test_apply_rejects_symlinked_old_file(tmp_path):
 
 def test_apply_rejects_extension_mismatch_and_overlong_name(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"abc")
-    report = apply_service(tmp_path).apply_rows([
-        row("a.mp4", "new.mkv"),
-        row("a.mp4", "x" * 252 + ".mp4"),
-    ], dry_run=False)
+    report = apply_service(tmp_path).apply_rows(
+        [
+            row("a.mp4", "new.mkv"),
+            row("a.mp4", "x" * 252 + ".mp4"),
+        ],
+        dry_run=False,
+    )
 
     assert [result.status for result in report.results] == ["error", "error"]
     assert (tmp_path / "a.mp4").exists()
@@ -891,7 +1026,10 @@ def test_apply_skips_size_check_when_size_unknown(tmp_path):
     write(tmp_path / "a.mp4", size=50)
     row = PreviewRow(True, "a.mp4", "b.mp4", "fingerprint", 1.0, "s", "", "h", None)
     report = TitleService(
-        str(tmp_path), {}, None, oshash_func=lambda path: "h",
+        str(tmp_path),
+        {},
+        None,
+        oshash_func=lambda path: "h",
     ).apply_rows([row], dry_run=False)
 
     assert report.results[0].status == "renamed"
@@ -901,10 +1039,13 @@ def test_apply_skips_size_check_when_size_unknown(tmp_path):
 def test_apply_rejects_stale_size_and_oshash(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"abc")
     (tmp_path / "b.mp4").write_bytes(b"abc")
-    report = apply_service(tmp_path).apply_rows([
-        row("a.mp4", "a-new.mp4", size=4),
-        row("b.mp4", "b-new.mp4", oshash="stale"),
-    ], dry_run=False)
+    report = apply_service(tmp_path).apply_rows(
+        [
+            row("a.mp4", "a-new.mp4", size=4),
+            row("b.mp4", "b-new.mp4", oshash="stale"),
+        ],
+        dry_run=False,
+    )
 
     assert [result.status for result in report.results] == ["error", "error"]
     assert (tmp_path / "a.mp4").exists()
@@ -918,8 +1059,8 @@ def test_apply_force_bypasses_size_and_hash_checks(tmp_path):
         raise AssertionError("force must not hash the source")
 
     report = apply_service(tmp_path, unexpected_hash).apply_rows(
-        [row("a.mp4", "b.mp4", oshash="stale", size=999)],
-        dry_run=False, force=True)
+        [row("a.mp4", "b.mp4", oshash="stale", size=999)], dry_run=False, force=True
+    )
 
     assert report.had_errors is False
     assert report.results[0].status == "renamed"
@@ -929,8 +1070,7 @@ def test_apply_force_bypasses_size_and_hash_checks(tmp_path):
 def test_apply_occupied_target_errors_without_overwriting(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"abc")
     (tmp_path / "b.mp4").write_bytes(b"old")
-    report = apply_service(tmp_path).apply_rows(
-        [row("a.mp4", "b.mp4")], dry_run=False)
+    report = apply_service(tmp_path).apply_rows([row("a.mp4", "b.mp4")], dry_run=False)
 
     assert report.results[0].status == "error"
     assert (tmp_path / "a.mp4").read_bytes() == b"abc"
@@ -941,7 +1081,8 @@ def test_apply_suffix_collisions_uses_numeric_suffix(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"abc")
     (tmp_path / "b.mp4").write_bytes(b"old")
     report = apply_service(tmp_path).apply_rows(
-        [row("a.mp4", "b.mp4")], dry_run=False, suffix_collisions=True)
+        [row("a.mp4", "b.mp4")], dry_run=False, suffix_collisions=True
+    )
 
     assert report.had_errors is False
     assert report.results[0].new_rel == "b (2).mp4"
@@ -952,8 +1093,7 @@ def test_apply_suffix_collisions_uses_numeric_suffix(tmp_path):
 def test_apply_dry_run_reports_actual_suffix_target(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"abc")
     (tmp_path / "b.mp4").write_bytes(b"old")
-    report = apply_service(tmp_path).apply_rows(
-        [row("a.mp4", "b.mp4")], suffix_collisions=True)
+    report = apply_service(tmp_path).apply_rows([row("a.mp4", "b.mp4")], suffix_collisions=True)
 
     assert report.results[0].status == "renamed"
     assert report.results[0].new_rel == "b (2).mp4"
@@ -994,10 +1134,13 @@ def test_apply_dry_run_invalidates_dependents_of_blocked_rows(tmp_path):
 
 def test_apply_validation_error_does_not_stop_other_rows(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"abc")
-    report = apply_service(tmp_path).apply_rows([
-        row("missing.mp4", "x.mp4"),
-        row("a.mp4", "b.mp4"),
-    ], dry_run=False)
+    report = apply_service(tmp_path).apply_rows(
+        [
+            row("missing.mp4", "x.mp4"),
+            row("a.mp4", "b.mp4"),
+        ],
+        dry_run=False,
+    )
 
     assert [result.status for result in report.results] == ["error", "renamed"]
     assert report.had_errors is True
@@ -1006,10 +1149,13 @@ def test_apply_validation_error_does_not_stop_other_rows(tmp_path):
 
 def test_apply_embedded_nul_does_not_stop_other_rows(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"abc")
-    report = apply_service(tmp_path).apply_rows([
-        row("bad\0.mp4", "x.mp4"),
-        row("a.mp4", "b.mp4"),
-    ], dry_run=False)
+    report = apply_service(tmp_path).apply_rows(
+        [
+            row("bad\0.mp4", "x.mp4"),
+            row("a.mp4", "b.mp4"),
+        ],
+        dry_run=False,
+    )
 
     assert [result.status for result in report.results] == ["error", "renamed"]
     assert report.had_errors is True
@@ -1022,16 +1168,18 @@ def test_apply_rename_failure_rolls_back_only_failed_row(tmp_path, monkeypatch):
     real_rename = os.rename
 
     def fail_second_target(src, dst):
-        if (os.path.basename(src).startswith("__ren_tmp_")
-                and os.path.basename(dst) == "d.mp4"):
+        if os.path.basename(src).startswith("__ren_tmp_") and os.path.basename(dst) == "d.mp4":
             raise OSError("injected rename failure")
         real_rename(src, dst)
 
     monkeypatch.setattr(title_service.os, "rename", fail_second_target)
-    report = apply_service(tmp_path).apply_rows([
-        row("a.mp4", "b.mp4"),
-        row("c.mp4", "d.mp4"),
-    ], dry_run=False)
+    report = apply_service(tmp_path).apply_rows(
+        [
+            row("a.mp4", "b.mp4"),
+            row("c.mp4", "d.mp4"),
+        ],
+        dry_run=False,
+    )
 
     assert [result.status for result in report.results] == ["renamed", "error"]
     assert (tmp_path / "b.mp4").read_bytes() == b"abc"
@@ -1045,16 +1193,18 @@ def test_apply_chain_failure_restores_original_paths(tmp_path, monkeypatch):
     real_rename = os.rename
 
     def fail_last_target(src, dst):
-        if (os.path.basename(src).startswith("__ren_tmp_")
-                and os.path.basename(dst) == "c.mp4"):
+        if os.path.basename(src).startswith("__ren_tmp_") and os.path.basename(dst) == "c.mp4":
             raise OSError("injected rename failure")
         real_rename(src, dst)
 
     monkeypatch.setattr(title_service.os, "rename", fail_last_target)
-    report = apply_service(tmp_path).apply_rows([
-        row("a.mp4", "b.mp4"),
-        row("b.mp4", "c.mp4"),
-    ], dry_run=False)
+    report = apply_service(tmp_path).apply_rows(
+        [
+            row("a.mp4", "b.mp4"),
+            row("b.mp4", "c.mp4"),
+        ],
+        dry_run=False,
+    )
 
     assert report.had_errors is True
     assert (tmp_path / "a.mp4").read_bytes() == b"abc"

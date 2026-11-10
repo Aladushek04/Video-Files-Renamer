@@ -56,7 +56,8 @@ def test_ids_differ_for_same_paths_in_same_second():
     t1 = "2026-11-06T10:00:00.000001Z"
     t2 = "2026-11-06T10:00:00.000002Z"
     assert entry_id(t1, "rename", "C:/r", "a.mp4", "b.mp4") != entry_id(
-        t2, "rename", "C:/r", "a.mp4", "b.mp4")
+        t2, "rename", "C:/r", "a.mp4", "b.mp4"
+    )
 
 
 def test_format_log_timestamp_has_microseconds_and_z():
@@ -82,8 +83,9 @@ def test_read_log_parses_new_format(tmp_path):
 
 def test_read_log_parses_legacy_rows_with_empty_root(tmp_path):
     path = tmp_path / "rename_log.csv"
-    path.write_text(LEGACY_HEADER + "\n2026-11-04T12:00:00Z;a.mp4;b.mp4;h;s;fingerprint\n",
-                    encoding="utf-8-sig")
+    path.write_text(
+        LEGACY_HEADER + "\n2026-11-04T12:00:00Z;a.mp4;b.mp4;h;s;fingerprint\n", encoding="utf-8-sig"
+    )
     entries = read_log(str(path))
     assert entries[0].legacy is True
     assert entries[0].root == ""
@@ -107,8 +109,9 @@ def test_append_migrates_legacy_file_once(tmp_path):
     path.write_text(LEGACY_HEADER + "\nT;a;b;h;s;f\n", encoding="utf-8-sig")
     append_log(str(path), [rename_entry(root="R", old="c.mp4", new="d.mp4")])
     assert (tmp_path / "rename_log.legacy.csv").exists()
-    assert path.read_text(encoding="utf-8-sig").splitlines()[0].startswith(
-        "timestamp;action;undoes")
+    assert (
+        path.read_text(encoding="utf-8-sig").splitlines()[0].startswith("timestamp;action;undoes")
+    )
     assert len(read_log(str(path))) == 2
 
 

@@ -24,6 +24,7 @@
 
 Зависимостей нет — только стандартная библиотека.
 """
+
 import json
 import os
 import sqlite3
@@ -133,11 +134,15 @@ class TitleCache:
         self, source: str, algorithm: str, digest: str
     ) -> list[Scene] | None:
         """Сцены источника по фингерпринту; `None`, если записи нет или она истекла."""
-        row = self._connection().execute(
-            "SELECT scenes, fetched_at FROM fingerprint_cache "
-            "WHERE source = ? AND algorithm = ? AND hash = ?",
-            (source, algorithm, digest),
-        ).fetchone()
+        row = (
+            self._connection()
+            .execute(
+                "SELECT scenes, fetched_at FROM fingerprint_cache "
+                "WHERE source = ? AND algorithm = ? AND hash = ?",
+                (source, algorithm, digest),
+            )
+            .fetchone()
+        )
         return self._scenes_from_row(row)
 
     def put_source_fingerprint(
@@ -156,10 +161,14 @@ class TitleCache:
 
     def get_local_phash(self, oshash: str, size: int) -> str | None:
         """PHASH файла по его содержимому (OSHASH и размер); TTL не действует."""
-        row = self._connection().execute(
-            "SELECT phash FROM local_phash WHERE oshash = ? AND size = ?",
-            (oshash, size),
-        ).fetchone()
+        row = (
+            self._connection()
+            .execute(
+                "SELECT phash FROM local_phash WHERE oshash = ? AND size = ?",
+                (oshash, size),
+            )
+            .fetchone()
+        )
         return row[0] if row else None
 
     def put_local_phash(self, oshash: str, size: int, phash: str) -> None:
@@ -174,10 +183,14 @@ class TitleCache:
 
     def get_text_query(self, term: str) -> list[Scene] | None:
         """Сцены по текстовому запросу; `None`, если записи нет или истекла."""
-        row = self._connection().execute(
-            "SELECT scenes, fetched_at FROM text_queries WHERE query = ?",
-            (term,),
-        ).fetchone()
+        row = (
+            self._connection()
+            .execute(
+                "SELECT scenes, fetched_at FROM text_queries WHERE query = ?",
+                (term,),
+            )
+            .fetchone()
+        )
         return self._scenes_from_row(row)
 
     def put_text_query(self, term: str, scenes: Sequence[Scene]) -> None:
@@ -196,8 +209,7 @@ class TitleCache:
             raise sqlite3.ProgrammingError("title cache is closed")
         return self._conn
 
-    def _put(self, table: str, key_column: str, key: str,
-             scenes: Sequence[Scene]) -> None:
+    def _put(self, table: str, key_column: str, key: str, scenes: Sequence[Scene]) -> None:
         """Записывает список сцен (JSON) с текущим временем."""
         payload = json.dumps([scene.to_dict() for scene in scenes])
         conn = self._connection()

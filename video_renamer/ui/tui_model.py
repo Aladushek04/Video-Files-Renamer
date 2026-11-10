@@ -1,4 +1,5 @@
 """Чистая модель TUI: фильтры, отметки и статистика без Textual."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -78,8 +79,7 @@ class ReviewModel:
     ) -> PreviewRow:
         row = self.rows[index]
         if new_rel == row.old_rel:
-            updated = replace(row, new_rel=new_rel, source="unchanged",
-                              approved=False)
+            updated = replace(row, new_rel=new_rel, source="unchanged", approved=False)
         else:
             updated = replace(
                 row,

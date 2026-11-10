@@ -1,4 +1,5 @@
 """Тесты загрузчика `.env`: парсинг, приоритет окружения, отсутствие файла."""
+
 import os
 
 from video_renamer.core.env_file import load_env_file
@@ -15,7 +16,7 @@ def test_loads_plain_export_quotes_and_comments(tmp_path, monkeypatch):
         "# comment\n"
         "A_PLAIN=one\n"
         "export B_EXPORT=two\n"
-        "C_DOUBLE=\"three four\"\n"
+        'C_DOUBLE="three four"\n'
         "D_SINGLE='five six'\n"
         "E_COMMENT=seven # trailing comment\n"
         "\n",
@@ -88,13 +89,19 @@ def test_scraper_main_reads_api_key_from_dotenv(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text("STASHDB_API_KEY=abc123\n", encoding="utf-8")
     monkeypatch.setattr(scrape_studios, "StashDBClient", FakeClient)
 
-    code = scrape_studios.main([
-        "--out", str(tmp_path / "studios.json"),
-        "--checkpoint", str(tmp_path / "checkpoint.json"),
-        "--raw", str(tmp_path / "raw.json"),
-        "--apply",
-        "--max-pages", "1",
-    ])
+    code = scrape_studios.main(
+        [
+            "--out",
+            str(tmp_path / "studios.json"),
+            "--checkpoint",
+            str(tmp_path / "checkpoint.json"),
+            "--raw",
+            str(tmp_path / "raw.json"),
+            "--apply",
+            "--max-pages",
+            "1",
+        ]
+    )
     assert code == 0
     assert seen["api_key"] == "abc123"
     assert "LoadedFromEnv" in (tmp_path / "studios.json").read_text(encoding="utf-8")
