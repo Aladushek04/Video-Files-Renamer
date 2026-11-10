@@ -16,8 +16,8 @@ from video_renamer.core.title_matcher import normalize_for_match
 
 __all__ = [
     "FINGERPRINT_SOURCES",
-    "FingerprintSource",
     "PRIMARY_SOURCE_NAME",
+    "FingerprintSource",
     "build_fingerprint_clients",
     "merge_scenes",
     "missing_secondary_keys",

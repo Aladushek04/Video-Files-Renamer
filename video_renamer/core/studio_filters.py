@@ -42,9 +42,7 @@ def is_useful_studio_name(name: str) -> bool:
         return False
     if _LONG_DIGIT_RUN.search(text):
         return False
-    if _GENERATED_ID_PREFIX.match(text):
-        return False
-    return True
+    return not _GENERATED_ID_PREFIX.match(text)
 
 
 def filter_studio_names(names: Sequence[str]) -> tuple[list[str], int]:

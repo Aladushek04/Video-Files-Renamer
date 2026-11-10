@@ -23,6 +23,11 @@ import sys
 from collections.abc import Sequence
 
 from video_renamer.core.clean_ph_names import load_studios
+from video_renamer.core.fingerprint_sources import (
+    build_fingerprint_clients,
+    missing_secondary_keys,
+)
+from video_renamer.core.phash import PhashToolError, check_phash_tools
 from video_renamer.core.rename_log import (
     ACTION_RENAME,
     LogEntry,
@@ -33,7 +38,6 @@ from video_renamer.core.rename_log import (
     format_log_timestamp,
     read_log,
 )
-from video_renamer.core.undo import run_undo, select_for_undo
 from video_renamer.core.stashdb_client import (
     StashDBAuthError,
     StashDBClient,
@@ -41,13 +45,9 @@ from video_renamer.core.stashdb_client import (
     StashDBResponseError,
     StashDBTransientError,
 )
-from video_renamer.core.fingerprint_sources import (
-    build_fingerprint_clients,
-    missing_secondary_keys,
-)
-from video_renamer.core.phash import PhashToolError, check_phash_tools
 from video_renamer.core.title_cache import TitleCache
 from video_renamer.core.title_service import ApplyResult, PreviewRow, TitleService
+from video_renamer.core.undo import run_undo, select_for_undo
 from video_renamer.paths import CACHE_PATH, LOG_PATH, STUDIOS_PATH, load_project_env
 
 __all__ = [

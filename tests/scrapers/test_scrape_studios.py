@@ -3,11 +3,16 @@ import json
 
 import pytest
 
+from video_renamer.core.stashdb_client import (
+    StashDBAuthError,
+    StashDBTransientError,
+    Studio,
+)
 from video_renamer.scrapers import stashdb as scrape_studios
 from video_renamer.scrapers.stashdb import (
-    Checkpoint,
     FANSDB_SOURCE,
     THEPORNDB_SOURCE,
+    Checkpoint,
     ScraperGapError,
     load_checkpoint,
     load_raw,
@@ -17,11 +22,6 @@ from video_renamer.scrapers.stashdb import (
     run_scrape,
     save_checkpoint,
     save_raw,
-)
-from video_renamer.core.stashdb_client import (
-    StashDBAuthError,
-    StashDBTransientError,
-    Studio,
 )
 
 

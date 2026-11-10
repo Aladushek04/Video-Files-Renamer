@@ -9,6 +9,7 @@ from video_renamer.scrapers.theporndb import (
     run_lookup,
 )
 
+
 class FakeClient:
     def __init__(self, responses):
         self.responses = list(responses)

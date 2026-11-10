@@ -29,7 +29,7 @@ classifiers = [
 
 [project.optional-dependencies]
 tui = ["textual>=8.2,<9"]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.17"]
 
 [project.scripts]
 video-renamer = "video_renamer.cli:main"
@@ -49,3 +49,17 @@ include = ["video_renamer*"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = [".venv"]
+
+[tool.ruff.lint.per-file-ignores]
+# Воркеры TUI ловят Exception намеренно: ошибка фонового потока должна попасть
+# в лог приложения, а не уронить интерфейс.
+"video_renamer/ui/tui.py" = ["BLE001"]
+# Здесь ValueError описывает битый JSON/checkpoint, а не неверный тип аргумента.
+"video_renamer/scrapers/merge_studios.py" = ["TRY004"]
+"video_renamer/scrapers/stashdb.py" = ["TRY004"]
+"video_renamer/scrapers/theporndb.py" = ["TRY004"]

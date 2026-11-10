@@ -19,7 +19,7 @@ from video_renamer.scrapers.stashdb import (
     merge_studios,
 )
 
-__all__ = ["merge_studio_dicts", "merge_studio_files", "main"]
+__all__ = ["main", "merge_studio_dicts", "merge_studio_files"]
 
 
 def _read_dict(path: str) -> dict[str, str]:

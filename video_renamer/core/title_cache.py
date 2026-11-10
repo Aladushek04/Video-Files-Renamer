@@ -39,17 +39,25 @@ CACHE_TTL_DAYS = 30
 _TTL = timedelta(days=CACHE_TTL_DAYS)
 
 _SCHEMA = (
-    "CREATE TABLE IF NOT EXISTS fingerprints ("
-    "hash TEXT PRIMARY KEY, scenes TEXT NOT NULL, fetched_at TEXT NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS text_queries ("
-    "query TEXT PRIMARY KEY, scenes TEXT NOT NULL, fetched_at TEXT NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS fingerprint_cache ("
-    "source TEXT NOT NULL, algorithm TEXT NOT NULL, hash TEXT NOT NULL, "
-    "scenes TEXT NOT NULL, fetched_at TEXT NOT NULL, "
-    "PRIMARY KEY (source, algorithm, hash))",
-    "CREATE TABLE IF NOT EXISTS local_phash ("
-    "oshash TEXT NOT NULL, size INTEGER NOT NULL, phash TEXT NOT NULL, "
-    "computed_at TEXT NOT NULL, PRIMARY KEY (oshash, size))",
+    (
+        "CREATE TABLE IF NOT EXISTS fingerprints ("
+        "hash TEXT PRIMARY KEY, scenes TEXT NOT NULL, fetched_at TEXT NOT NULL)"
+    ),
+    (
+        "CREATE TABLE IF NOT EXISTS text_queries ("
+        "query TEXT PRIMARY KEY, scenes TEXT NOT NULL, fetched_at TEXT NOT NULL)"
+    ),
+    (
+        "CREATE TABLE IF NOT EXISTS fingerprint_cache ("
+        "source TEXT NOT NULL, algorithm TEXT NOT NULL, hash TEXT NOT NULL, "
+        "scenes TEXT NOT NULL, fetched_at TEXT NOT NULL, "
+        "PRIMARY KEY (source, algorithm, hash))"
+    ),
+    (
+        "CREATE TABLE IF NOT EXISTS local_phash ("
+        "oshash TEXT NOT NULL, size INTEGER NOT NULL, phash TEXT NOT NULL, "
+        "computed_at TEXT NOT NULL, PRIMARY KEY (oshash, size))"
+    ),
 )
 _LEGACY_MIGRATION = (
     "INSERT OR IGNORE INTO fingerprint_cache "

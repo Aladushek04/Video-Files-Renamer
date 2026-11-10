@@ -57,8 +57,8 @@ from video_renamer.core.title_matcher import (
 __all__ = [
     "ApplyReport",
     "ApplyResult",
-    "PreviewRow",
     "PreviewReport",
+    "PreviewRow",
     "ProgressEvent",
     "TitleService",
     "iter_video_files",
@@ -283,8 +283,7 @@ def _collision_name(stem: str, suffix: str, number: int) -> str:
     """
     marker = "" if number <= 1 else f" ({number})"
     room = _MAX_FULL_NAME - len(suffix) - len(marker)
-    if room < 0:
-        room = 0
+    room = max(room, 0)
     if len(stem) > room:
         stem = stem[:room].rstrip(" -")
     return _cap_length(stem + marker, suffix)

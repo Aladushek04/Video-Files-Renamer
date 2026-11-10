@@ -100,7 +100,7 @@ def format_log_timestamp(moment: datetime | None = None) -> str:
 
 def entry_id(timestamp: str, action: str, root: str, old: str, new: str) -> str:
     """Идентификатор строки: 10 hex-символов от её полей."""
-    raw = "|".join((timestamp, action, root, old, new)).encode("utf-8")
+    raw = f"{timestamp}|{action}|{root}|{old}|{new}".encode()
     return hashlib.sha1(raw).hexdigest()[:10]
 
 

@@ -21,6 +21,14 @@ from pathlib import Path
 from typing import Any
 
 from video_renamer.core.env_file import load_env_file
+from video_renamer.core.stashdb_client import (
+    StashDBAuthError,
+    StashDBClient,
+    StashDBError,
+    StashDBTransientError,
+    Studio,
+)
+from video_renamer.core.studio_filters import filter_studio_names
 from video_renamer.scrapers.stashdb import (
     THEPORNDB_SOURCE,
     _atomic_write_json,
@@ -32,14 +40,6 @@ from video_renamer.scrapers.stashdb import (
     merge_studios,
     save_raw,
 )
-from video_renamer.core.stashdb_client import (
-    StashDBAuthError,
-    StashDBClient,
-    StashDBError,
-    StashDBTransientError,
-    Studio,
-)
-from video_renamer.core.studio_filters import filter_studio_names
 
 __all__ = [
     "LookupCheckpoint",

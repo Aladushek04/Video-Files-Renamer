@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from video_renamer.cli import append_rename_log
 from video_renamer.core import undo as undo_module
 from video_renamer.core.oshash import oshash_from_path
 from video_renamer.core.rename_log import (
@@ -11,7 +12,6 @@ from video_renamer.core.rename_log import (
 )
 from video_renamer.core.title_service import PreviewRow, TitleService
 from video_renamer.core.undo import run_undo, select_for_undo
-from video_renamer.cli import append_rename_log
 
 
 def write(path, data: bytes):

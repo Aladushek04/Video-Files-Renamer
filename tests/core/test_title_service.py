@@ -1,4 +1,5 @@
 import os
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -715,7 +716,7 @@ def test_preview_returns_immutable_report(tmp_path):
 
     assert isinstance(report.rows, tuple)
     assert isinstance(report.warnings, tuple)
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         report.had_transient_errors = True
 
 
@@ -969,7 +970,7 @@ def test_apply_dry_run_validates_without_changing_files(tmp_path):
     assert (tmp_path / "a.mp4").read_bytes() == b"abc"
     assert not (tmp_path / "b.mp4").exists()
     assert not list(tmp_path.glob("__ren_tmp_*"))
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         report.had_errors = True
 
 
