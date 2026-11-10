@@ -418,6 +418,7 @@ merge-studios --help
 - `docs/architecture.md` — исходный дизайн.
 - `docs/superpowers/` — спецификации и планы последних функций (PHASH,
   откат, справочник имён).
+- `docs/releases/v0.1.5.md` — текст релиза 0.1.5 (все изменения с 0.1.0).
 - `docs/releases/v0.1.0.md` — текст релиза 0.1.0.
 
 ---
