@@ -31,17 +31,25 @@ def test_strip_tech_junk_after_underscore_separator():
     assert strip_tech_junk("Title_1080p") == "Title"
 
 
+def test_strip_tech_junk_splits_hyphen_separated_words():
+    assert strip_tech_junk("one-two-three") == "one two three"
+
+
+def test_strip_tech_junk_cuts_hyphenated_quality():
+    assert strip_tech_junk("Title-full-hd-1080p") == "Title"
+
+
 def test_unicode_stem_untouched():
     assert strip_tech_junk("Olivia del Río 1080p") == "Olivia del Río"
 
 
 def test_extract_date_yy_mm_dd():
-    rest, d = extract_date("brazzersexxtra 26.10.03 ryan reid")
+    _, d = extract_date("brazzersexxtra 26.10.03 ryan reid")
     assert d == "03.10.2026"
 
 
 def test_extract_date_yyyy_mm_dd():
-    rest, d = extract_date("Title 2023.10.14 rest")
+    _, d = extract_date("Title 2023.10.14 rest")
     assert d == "14.10.2023"
 
 
@@ -59,7 +67,7 @@ def test_extract_date_ignores_invalid_compact():
 
 def test_extract_studio_from_dict():
     studios = {"brazzersexxtra": "BrazzersExxtra"}
-    studio, rest = extract_studio("brazzersexxtra ryan reid", studios)
+    studio, _ = extract_studio("brazzersexxtra ryan reid", studios)
     assert studio == "BrazzersExxtra"
 
 
@@ -95,7 +103,7 @@ def test_split_camel_joined_names():
 
 
 def test_split_actors_title_comma():
-    actors, title = split_actors_title("Lily Phillips, Martina Smeraldi DOUBLE PENETRATION BANG")
+    actors, _ = split_actors_title("Lily Phillips, Martina Smeraldi DOUBLE PENETRATION BANG")
     assert actors == ["Lily Phillips", "Martina Smeraldi"]
 
 
@@ -124,7 +132,7 @@ def test_lowercase_actors_detected():
 
 
 def test_dash_date_yyyy_mm_dd():
-    rest, d = extract_date("Cuckold Sessions 2019-12-01 Brittany Andrews")
+    _, d = extract_date("Cuckold Sessions 2019-12-01 Brittany Andrews")
     assert d == "01.12.2019"
 
 
@@ -138,7 +146,7 @@ def test_part_roman_numerals_kept():
 
 
 def test_particle_three_word_name():
-    actors, title = split_actors_title("Olivia Del Rio 02")
+    actors, _ = split_actors_title("Olivia Del Rio 02")
     assert actors == ["Olivia Del Rio"]
 
 
@@ -146,3 +154,14 @@ def test_hyphenated_studio_normalized():
     studios = {"brazzersexxtra": "BrazzersExxtra"}
     out = clean_stem("brazzers-exxtra 26.10.03 ryan reid poking glory", studios)
     assert out == "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory"
+
+
+def test_clean_stem_hyphen_separated_actors():
+    out = clean_stem("ryan-reid-poking-glory", {})
+    assert out == "Ryan Reid - Poking Glory"
+
+
+def test_clean_stem_hyphenated_studio_is_detected():
+    studios = {"hussiepass": "HussiePass"}
+    out = clean_stem("hussie-pass-anastasia-shades-1080p", studios)
+    assert out == "HussiePass - Anastasia Shades"

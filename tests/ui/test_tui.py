@@ -8,19 +8,21 @@ import pytest
 
 pytest.importorskip("textual")
 
-from video_renamer.core.stashdb_client import (  # noqa: E402
+from textual.widgets import Input, OptionList
+
+from video_renamer.core.oshash import oshash_from_path
+from video_renamer.core.stashdb_client import (
     Performer,
     Scene,
     Studio,
 )
-from video_renamer.core.oshash import oshash_from_path  # noqa: E402
-from video_renamer.core.title_service import (  # noqa: E402
+from video_renamer.core.title_service import (
     ApplyReport,
     ApplyResult,
     PreviewReport,
     PreviewRow,
 )
-from video_renamer.ui.tui import RenamerApp  # noqa: E402
+from video_renamer.ui.tui import DirectoryPicker, RenamerApp
 
 ROWS = (
     PreviewRow(
@@ -187,8 +189,8 @@ def test_undo_screen_survives_unreadable_log(tmp_path, monkeypatch):
 
 
 def test_undo_worker_error_is_shown_not_fatal(tmp_path, monkeypatch):
-    from video_renamer.ui import tui as tui_module
     from video_renamer.core.undo import run_undo as real_run_undo
+    from video_renamer.ui import tui as tui_module
 
     def failing(selection, *, log_path, dry_run, now=None):
         if dry_run:
@@ -219,9 +221,9 @@ def test_undo_worker_error_is_shown_not_fatal(tmp_path, monkeypatch):
 
 
 def test_undo_shows_unwritten_journal_rows(tmp_path, monkeypatch):
-    from video_renamer.ui import tui as tui_module
     from video_renamer.core.undo import UndoReport, UndoResult
     from video_renamer.core.undo import run_undo as real_run_undo
+    from video_renamer.ui import tui as tui_module
 
     def unwritten(selection, *, log_path, dry_run, now=None):
         if dry_run:
@@ -653,6 +655,72 @@ def test_studio_dialog_runs_task(tmp_path, monkeypatch):
             await pilot.click("#studio-close")
             await pilot.pause()
             assert not app.query("#studio-dialog")
+
+    asyncio.run(run())
+
+
+def test_folder_input_is_empty_and_has_placeholder(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    async def run() -> None:
+        app = RenamerApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            folder = app.query_one("#folder", Input)
+            assert folder.value == ""
+            assert folder.placeholder == "Выберите папку"
+
+    asyncio.run(run())
+
+
+def test_directory_picker_navigates_into_subfolder_and_chooses_it(tmp_path):
+    target = tmp_path / "Videos"
+    target.mkdir()
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path))
+        async with app.run_test(size=(140, 40)) as pilot:
+            app.action_browse()
+            await pilot.pause()
+            picker = app.screen
+            assert isinstance(picker, DirectoryPicker)
+
+            options = picker.query_one("#picker-list", OptionList)
+            index = next(
+                i for i in range(options.option_count)
+                if options.get_option_at_index(i).id == str(target)
+            )
+            options.highlighted = index
+            options.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert picker.path == target
+
+            await pilot.click("#picker-choose")
+            await pilot.pause()
+            assert app.folder == target
+            assert app.query_one("#folder", Input).value == str(target)
+
+    asyncio.run(run())
+
+
+def test_directory_picker_goes_up_to_parent(tmp_path):
+    start = tmp_path / "child"
+    start.mkdir()
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(start))
+        async with app.run_test(size=(140, 40)) as pilot:
+            app.action_browse()
+            await pilot.pause()
+            picker = app.screen
+            assert isinstance(picker, DirectoryPicker)
+            options = picker.query_one("#picker-list", OptionList)
+            options.highlighted = 0
+            options.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert picker.path == tmp_path
 
     asyncio.run(run())
 

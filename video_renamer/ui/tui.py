@@ -6,25 +6,25 @@ Textual нужен только для этого файла; ядро прое�
 """
 from __future__ import annotations
 
+import csv
 import os
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
-
-import csv
+from typing import ClassVar
 
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     Checkbox,
     DataTable,
-    DirectoryTree,
     Footer,
     Header,
     Input,
@@ -36,15 +36,14 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
+from video_renamer.cli import append_rename_log
 from video_renamer.core.clean_ph_names import load_studios
+from video_renamer.core.fingerprint_sources import build_fingerprint_clients
 from video_renamer.core.rename_log import (
     active_renames,
     format_log_timestamp,
     read_log,
 )
-from video_renamer.core.undo import run_undo, select_for_undo
-from video_renamer.cli import append_rename_log
-from video_renamer.core.fingerprint_sources import build_fingerprint_clients
 from video_renamer.core.stashdb_client import Scene, StashDBClient
 from video_renamer.core.title_cache import TitleCache
 from video_renamer.core.title_matcher import is_valid_final_stem
@@ -55,6 +54,7 @@ from video_renamer.core.title_service import (
     ProgressEvent,
     TitleService,
 )
+from video_renamer.core.undo import run_undo, select_for_undo
 from video_renamer.paths import (
     CACHE_PATH,
     LOG_PATH,
@@ -88,9 +88,33 @@ PHASE_LABELS = {
 }
 
 
-def _default_folder() -> Path:
-    preferred = Path(r"D:\Videos\PH")
-    return preferred if preferred.is_dir() else Path.cwd()
+def _reveal_folder() -> Path:
+    """Стартовая папка для окна выбора, если путь ещё не задан."""
+    for candidate in (Path.home(), Path.cwd()):
+        try:
+            if candidate.is_dir():
+                return candidate
+        except OSError:
+            continue
+    return Path.cwd()
+
+
+def _windows_drives() -> list[Path]:
+    """Список доступных дисков для навигации с корня."""
+    if os.name != "nt":
+        return []
+    try:
+        return [Path(drive) for drive in os.listdrives()]
+    except AttributeError:
+        drives: list[Path] = []
+        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            path = Path(f"{letter}:\\")
+            try:
+                if path.is_dir():
+                    drives.append(path)
+            except OSError:
+                continue
+        return drives
 
 
 def _approved_text(approved: bool) -> Text:
@@ -100,33 +124,126 @@ def _approved_text(approved: bool) -> Text:
 
 
 class DirectoryPicker(ModalScreen[Path | None]):
-    """Модальный выбор папки через дерево каталогов."""
+    """Модальный выбор папки с навигацией по каталогам и дискам."""
 
-    BINDINGS = [Binding("escape", "cancel", "Отмена")]
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "cancel", "Отмена"),
+        Binding("backspace", "up", "Вверх"),
+    ]
 
-    def __init__(self, start: Path) -> None:
+    def __init__(self, start: Path | None = None) -> None:
         super().__init__()
-        self.start = start
+        self.path = self._start_dir(start)
+
+    @staticmethod
+    def _start_dir(start: Path | None) -> Path:
+        if start is not None:
+            try:
+                path = Path(start).expanduser()
+                if path.is_dir():
+                    return path
+            except OSError:
+                pass
+        return _reveal_folder()
 
     def compose(self) -> ComposeResult:
         with Vertical(id="picker-dialog"):
             yield Static("Выберите папку с видео", classes="modal-title")
             yield Static(
-                "Enter — выбрать подсвеченную папку",
+                "Enter — открыть папку, Backspace — на уровень выше. "
+                "«Выбрать» — взять текущую папку.",
                 classes="modal-hint",
             )
-            yield DirectoryTree(str(self.start), id="picker-tree")
+            yield Input(value=str(self.path), id="picker-path")
+            yield OptionList(id="picker-list")
             with Horizontal(classes="modal-buttons"):
                 yield Button("Отмена", id="picker-cancel")
+                yield Button(
+                    "Выбрать", id="picker-choose", variant="primary"
+                )
 
-    def on_directory_tree_directory_selected(
-        self, event: DirectoryTree.DirectorySelected
+    def on_mount(self) -> None:
+        self._reload()
+        self.query_one("#picker-list", OptionList).focus()
+
+    def _reload(self) -> None:
+        self.query_one("#picker-path", Input).value = str(self.path)
+        parent = self.path.parent
+        options: list[Option] = []
+        if parent != self.path:
+            options.append(Option(Text("..  (на уровень выше)"), id=".."))
+        for drive in _windows_drives():
+            if drive != self.path:
+                options.append(Option(Text(str(drive)), id=str(drive)))
+        folders: list[str] = []
+        try:
+            with os.scandir(self.path) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir():
+                            folders.append(entry.path)
+                    except OSError:
+                        continue
+        except OSError as exc:
+            self.notify(
+                f"Не удалось прочитать папку: {exc}",
+                severity="error",
+                timeout=8,
+            )
+        folders.sort(key=lambda item: Path(item).name.casefold())
+        for folder in folders:
+            options.append(Option(Text(Path(folder).name), id=folder))
+        if not options:
+            options.append(
+                Option(Text("(подпапок нет)"), id=None, disabled=True)
+            )
+        option_list = self.query_one("#picker-list", OptionList)
+        option_list.clear_options()
+        option_list.add_options(options)
+        if options:
+            option_list.highlighted = 0
+        option_list.scroll_to_highlight()
+
+    def _navigate(self, path: Path) -> None:
+        try:
+            path = path.expanduser()
+            if not path.is_dir():
+                self.notify("Папка не найдена", severity="error")
+                return
+        except OSError:
+            self.notify("Папка не найдена", severity="error")
+            return
+        self.path = path
+        self._reload()
+        self.query_one("#picker-list", OptionList).focus()
+
+    def on_option_list_option_selected(
+        self, event: OptionList.OptionSelected
     ) -> None:
-        self.dismiss(event.path)
+        event.stop()
+        option_id = event.option_id
+        if not option_id:
+            return
+        if option_id == "..":
+            self._navigate(self.path.parent)
+        else:
+            self._navigate(Path(option_id))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "picker-path":
+            return
+        raw = event.value.strip().strip('"')
+        if raw:
+            self._navigate(Path(raw))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "picker-cancel":
             self.dismiss(None)
+        elif event.button.id == "picker-choose":
+            self.dismiss(self.path)
+
+    def action_up(self) -> None:
+        self._navigate(self.path.parent)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -135,7 +252,7 @@ class DirectoryPicker(ModalScreen[Path | None]):
 class ConfirmApply(ModalScreen[bool]):
     """Подтверждение реального переименования."""
 
-    BINDINGS = [Binding("escape", "cancel", "Отмена")]
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "cancel", "Отмена")]
 
     def __init__(self, folder: str, count: int, sources: dict[str, int]) -> None:
         super().__init__()
@@ -173,7 +290,7 @@ class ConfirmApply(ModalScreen[bool]):
 class ConfirmQuit(ModalScreen[bool]):
     """Подтверждение выхода, если в таблице есть несохранённые строки."""
 
-    BINDINGS = [Binding("escape", "cancel", "Отмена")]
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "cancel", "Отмена")]
 
     def __init__(self, total: int, approved: int) -> None:
         super().__init__()
@@ -204,7 +321,7 @@ class ConfirmQuit(ModalScreen[bool]):
 class ApplyResultModal(ModalScreen[None]):
     """Итог применения: сколько переименовано и какие ошибки."""
 
-    BINDINGS = [Binding("escape", "close", "Закрыть")]
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "close", "Закрыть")]
 
     def __init__(
         self,
@@ -263,7 +380,7 @@ class ApplyResultModal(ModalScreen[None]):
 class CandidatePicker(ModalScreen[Scene | None]):
     """Выбор альтернативной сцены из `PreviewRow.candidates`."""
 
-    BINDINGS = [Binding("escape", "cancel", "Отмена")]
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "cancel", "Отмена")]
 
     def __init__(self, row: PreviewRow) -> None:
         super().__init__()
@@ -323,7 +440,7 @@ class CandidatePicker(ModalScreen[Scene | None]):
 class NameEditor(ModalScreen[str | None]):
     """Ручное редактирование имени файла."""
 
-    BINDINGS = [Binding("escape", "cancel", "Отмена")]
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "cancel", "Отмена")]
 
     def __init__(self, row: PreviewRow) -> None:
         super().__init__()
@@ -392,9 +509,9 @@ class NameEditor(ModalScreen[str | None]):
 class StudioDialog(ModalScreen[None]):
     """Запуск скраперов студий и слияния справочников."""
 
-    BINDINGS = [Binding("escape", "close", "Закрыть")]
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "close", "Закрыть")]
 
-    TASKS = {
+    TASKS: ClassVar[dict[str, str]] = {
         "studio-stashdb": "stashdb",
         "studio-fansdb": "fansdb",
         "studio-theporndb": "theporndb",
@@ -452,7 +569,7 @@ class StudioDialog(ModalScreen[None]):
                 lambda line: self.app.call_from_thread(self._append_log, line),
                 cancel_event=self._cancel_event,
             )
-        except Exception as exc:  # noqa: BLE001 - shown in the log
+        except Exception as exc:
             self.app.call_from_thread(self._finished, kind, 2, str(exc))
             return
         self.app.call_from_thread(self._finished, kind, code, "")
@@ -460,7 +577,7 @@ class StudioDialog(ModalScreen[None]):
     def _append_log(self, line: str) -> None:
         try:
             self.query_one("#studio-log", RichLog).write(Text(line))
-        except Exception:
+        except NoMatches:
             pass
 
     def _finished(self, kind: str, code: int, error: str) -> None:
@@ -513,7 +630,7 @@ class StudioDialog(ModalScreen[None]):
 class ConfirmUndo(ModalScreen[bool]):
     """Подтверждение отката: предпросмотр и отметка для строк старого формата."""
 
-    BINDINGS = [Binding("escape", "cancel", "Отмена")]
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "cancel", "Отмена")]
 
     def __init__(self, body: str, has_legacy: bool) -> None:
         super().__init__()
@@ -549,7 +666,7 @@ class ConfirmUndo(ModalScreen[bool]):
 class UndoLogScreen(ModalScreen[None]):
     """Журнал: активные строки, отметки пробелом и откат выбранных."""
 
-    BINDINGS = [
+    BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "close", "Закрыть"),
         Binding("space", "toggle", "Отметить"),
     ]
@@ -669,7 +786,7 @@ class UndoLogScreen(ModalScreen[None]):
                 confirm_legacy=has_legacy,
             )
             report = run_undo(selection, log_path=self._log_path, dry_run=False)
-        except Exception as exc:  # noqa: BLE001 - shown to the user, not fatal
+        except Exception as exc:
             self.app.call_from_thread(self._undo_failed, str(exc) or exc.__class__.__name__)
             return
         renamed = sum(1 for r in report.results if r.status == "renamed")
@@ -707,7 +824,7 @@ class RenamerApp(App[None]):
     SUB_TITLE = "StashDB · FansDB · ThePornDB"
     MIN_WIDTH = 140
     MIN_HEIGHT = 40
-    BINDINGS = [
+    BINDINGS: ClassVar[list[Binding]] = [
         Binding("q", "quit", "Выход"),
         Binding("p", "preview", "Preview"),
         Binding("b", "browse", "Папка"),
@@ -728,8 +845,8 @@ class RenamerApp(App[None]):
         undo_log_path: str | None = None,
     ) -> None:
         super().__init__()
-        self.folder = Path(folder) if folder else _default_folder()
-        self.model = ReviewModel(str(self.folder), [])
+        self.folder: Path | None = Path(folder) if folder else None
+        self.model = ReviewModel(str(self.folder) if self.folder else "", [])
         self._preview_factory = preview_factory
         self._apply_factory = apply_factory
         self.undo_log_path = undo_log_path or str(LOG_PATH)
@@ -745,9 +862,9 @@ class RenamerApp(App[None]):
                 yield Static("VIDEO FILES\nRENAMER", id="brand")
                 yield Static("Папка с видео", classes="field-label")
                 yield Input(
-                    value=str(self.folder),
+                    value=str(self.folder) if self.folder else "",
                     id="folder",
-                    placeholder=r"D:\Videos\PH",
+                    placeholder="Выберите папку",
                 )
                 with Horizontal(id="sidebar-actions"):
                     yield Button("Выбрать", id="browse")
@@ -996,9 +1113,14 @@ class RenamerApp(App[None]):
     def action_browse(self) -> None:
         if self._busy:
             return
-        start = Path(self.query_one("#folder", Input).value or self.folder)
-        if not start.is_dir():
-            start = Path.cwd()
+        typed = self.query_one("#folder", Input).value.strip()
+        start: Path | None = None
+        if typed:
+            candidate = Path(typed).expanduser()
+            if candidate.is_dir():
+                start = candidate
+        if start is None and self.folder is not None and self.folder.is_dir():
+            start = self.folder
         self.push_screen(DirectoryPicker(start), self._folder_picked)
 
     def _folder_picked(self, path: Path | None) -> None:
@@ -1050,7 +1172,7 @@ class RenamerApp(App[None]):
 
         try:
             report = self._preview_worker_impl(folder, progress)
-        except Exception as exc:  # noqa: BLE001 - shown to the user
+        except Exception as exc:
             self.call_from_thread(self._preview_failed, exc)
             return
         self.call_from_thread(self._preview_done, folder, report)
@@ -1124,7 +1246,7 @@ class RenamerApp(App[None]):
             updated = self._get_service().build_alternative(
                 self.model.rows[index], scene, self.model.rows
             )
-        except Exception as exc:  # noqa: BLE001 - shown to the user
+        except Exception as exc:
             self.notify(f"Не удалось собрать имя: {exc}", severity="error")
             return
         self.model.set_row(index, updated)
@@ -1205,7 +1327,7 @@ class RenamerApp(App[None]):
     def _apply_worker(self, rows: list[PreviewRow]) -> None:
         try:
             report, log_error = self._apply_worker_impl(rows)
-        except Exception as exc:  # noqa: BLE001 - shown to the user
+        except Exception as exc:
             self.call_from_thread(self._apply_failed, exc)
             return
         self.call_from_thread(self._apply_done, report, log_error)
@@ -1226,7 +1348,7 @@ class RenamerApp(App[None]):
                     format_log_timestamp(),
                     root=str(self.model.folder),
                 )
-            except Exception as exc:  # noqa: BLE001 - log must not hide result
+            except Exception as exc:
                 log_error = str(exc) or exc.__class__.__name__
         return report, log_error
 

@@ -8,6 +8,9 @@ _KEEP_PAREN = re.compile(r"\((remastered|part\s*\d+)\)", re.IGNORECASE)
 _TECH_PAREN = re.compile(r"\(\s*\d{1,4}\s*\)")
 _TECH_WORD = re.compile(r"(?i)\b(1080p|720p|2160p|4320p|4k|8k|uhd|hd|fullhd|full-hd|xxx)\b")
 _SEP = re.compile(r"[._+]+")
+_HYPHEN = re.compile(r"-+")
+_BLOCK_SEP = " - "
+_BLOCK_SENTINEL = "\x01"
 _WS = re.compile(r"\s+")
 _EMPTY_PAREN = re.compile(r"\(\s*\)")
 _DATE_YMD4 = re.compile(r"\(?(\d{4})[.-](\d{2})[.-](\d{2})\)?")
@@ -27,7 +30,13 @@ def split_name(filename: str) -> tuple:
 
 
 def strip_tech_junk(stem: str) -> str:
-    """Режет техмусор, чистит разделители. Скобки (Remastered)/(Part N) сохраняет."""
+    """Режет техмусор, чистит разделители. Скобки (Remastered)/(Part N) сохраняет.
+
+    Разделителями считаются `.`, `_`, `+` и `-`: `veronica-leal` превращается
+    в `veronica leal`. Уже готовый блочный разделитель ` - ` сохраняется,
+    чтобы не терять структуру `Студия - Дата - Актёры - Название`. Дефисы
+    режутся после техмусора, чтобы `full-hd` и `Title-1080p` резались целиком.
+    """
     keepers = []
 
     def _hold(m):
@@ -39,6 +48,9 @@ def strip_tech_junk(stem: str) -> str:
     s = _TECH_PAREN.sub(" ", s)
     s = _TECH_WORD.sub(" ", s)
     s = _EMPTY_PAREN.sub(" ", s)
+    s = s.replace(_BLOCK_SEP, _BLOCK_SENTINEL)
+    s = _HYPHEN.sub(" ", s)
+    s = s.replace(_BLOCK_SENTINEL, _BLOCK_SEP)
     s = _WS.sub(" ", s).strip(" -")
     for i, k in enumerate(keepers):
         s = s.replace(f"\x00{i}\x00", k)
