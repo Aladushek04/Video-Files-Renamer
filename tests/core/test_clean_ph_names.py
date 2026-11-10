@@ -1,14 +1,9 @@
 from video_renamer.core.clean_ph_names import (
-    apply_renames,
-    build_new_name,
-    clean_filename,
     clean_stem,
     extract_date,
     extract_studio,
-    load_studios,
     normalize_studio_key,
     prepare_stem,
-    preview_directory,
     split_actors_title,
     split_camel,
     split_name,
@@ -36,17 +31,25 @@ def test_strip_tech_junk_after_underscore_separator():
     assert strip_tech_junk("Title_1080p") == "Title"
 
 
+def test_strip_tech_junk_splits_hyphen_separated_words():
+    assert strip_tech_junk("one-two-three") == "one two three"
+
+
+def test_strip_tech_junk_cuts_hyphenated_quality():
+    assert strip_tech_junk("Title-full-hd-1080p") == "Title"
+
+
 def test_unicode_stem_untouched():
     assert strip_tech_junk("Olivia del Río 1080p") == "Olivia del Río"
 
 
 def test_extract_date_yy_mm_dd():
-    rest, d = extract_date("brazzersexxtra 26.10.03 ryan reid")
+    _, d = extract_date("brazzersexxtra 26.10.03 ryan reid")
     assert d == "03.10.2026"
 
 
 def test_extract_date_yyyy_mm_dd():
-    rest, d = extract_date("Title 2023.10.14 rest")
+    _, d = extract_date("Title 2023.10.14 rest")
     assert d == "14.10.2023"
 
 
@@ -64,7 +67,7 @@ def test_extract_date_ignores_invalid_compact():
 
 def test_extract_studio_from_dict():
     studios = {"brazzersexxtra": "BrazzersExxtra"}
-    studio, rest = extract_studio("brazzersexxtra ryan reid", studios)
+    studio, _ = extract_studio("brazzersexxtra ryan reid", studios)
     assert studio == "BrazzersExxtra"
 
 
@@ -100,7 +103,7 @@ def test_split_camel_joined_names():
 
 
 def test_split_actors_title_comma():
-    actors, title = split_actors_title("Lily Phillips, Martina Smeraldi DOUBLE PENETRATION BANG")
+    actors, _ = split_actors_title("Lily Phillips, Martina Smeraldi DOUBLE PENETRATION BANG")
     assert actors == ["Lily Phillips", "Martina Smeraldi"]
 
 
@@ -116,25 +119,6 @@ def test_eporner_prefix_stripped():
     assert "Eporner" not in out and "Adriana Lorenzi" in out
 
 
-def test_preview_idempotent_and_collision(tmp_path):
-    (tmp_path / "a 1080p.mp4").touch()
-    (tmp_path / "a XXX.mp4").touch()
-    rows = preview_directory(str(tmp_path), {})
-    assert rows[0][1] != rows[1][1]
-    assert rows[0][1].endswith(".mp4")
-
-
-def test_preview_idempotent_clean_name(tmp_path):
-    (tmp_path / "Vrbangers - 22.12.2025 - Gabbie Carter - Title.mp4").touch()
-    rows = preview_directory(str(tmp_path), {"vrbangers": "Vrbangers"})
-    assert rows[0][0] == rows[0][1]
-
-
-def test_preview_truncates_very_long(tmp_path):
-    out = clean_filename("a" * 250 + ".mp4", {})
-    assert len(out) <= 255 and out.endswith(".mp4")
-
-
 def test_studio_before_camel_split():
     studios = {"hussiepass": "HussiePass"}
     out = clean_stem("HussiePass.26.07.31.Anastasia.Shades.1080p", studios)
@@ -148,7 +132,7 @@ def test_lowercase_actors_detected():
 
 
 def test_dash_date_yyyy_mm_dd():
-    rest, d = extract_date("Cuckold Sessions 2019-12-01 Brittany Andrews")
+    _, d = extract_date("Cuckold Sessions 2019-12-01 Brittany Andrews")
     assert d == "01.12.2019"
 
 
@@ -162,7 +146,7 @@ def test_part_roman_numerals_kept():
 
 
 def test_particle_three_word_name():
-    actors, title = split_actors_title("Olivia Del Rio 02")
+    actors, _ = split_actors_title("Olivia Del Rio 02")
     assert actors == ["Olivia Del Rio"]
 
 
@@ -172,37 +156,12 @@ def test_hyphenated_studio_normalized():
     assert out == "BrazzersExxtra - 03.10.2026 - Ryan Reid - Poking Glory"
 
 
-def test_long_name_truncation_real():
-    out = clean_filename("a" * 300 + " 1080p.mp4", {})
-    assert len(out) <= 255 and out.endswith(".mp4")
+def test_clean_stem_hyphen_separated_actors():
+    out = clean_stem("ryan-reid-poking-glory", {})
+    assert out == "Ryan Reid - Poking Glory"
 
 
-def test_recursive_preview_keeps_subdir(tmp_path):
-    sub = tmp_path / "sub"
-    sub.mkdir()
-    (sub / "b 1080p.mp4").touch()
-    rows = preview_directory(str(tmp_path), {}, recursive=True)
-    assert len(rows) == 1
-    old, new = rows[0]
-    assert "sub" in old and "sub" in new
-    assert new.endswith(".mp4")
-
-
-def test_truncation_collision_stays_short(tmp_path):
-    long1 = "a" * 240 + " 1080p.mp4"
-    long2 = "a" * 240 + " XXX.mp4"
-    (tmp_path / long1).touch()
-    (tmp_path / long2).touch()
-    rows = preview_directory(str(tmp_path), {})
-    assert all(len(new) <= 255 and new.endswith(".mp4") for _, new in rows)
-    assert rows[0][1] != rows[1][1]
-
-
-def test_apply_overlapping_names_safe(tmp_path):
-    (tmp_path / "x 1080p.mp4").touch()
-    (tmp_path / "X.mp4").touch()
-    rows = preview_directory(str(tmp_path), {})
-    apply_renames(str(tmp_path), rows)
-    names = sorted(p.name for p in tmp_path.iterdir())
-    assert "X.mp4" in names
-    assert any(n.startswith("X (") and n.endswith(".mp4") for n in names)
+def test_clean_stem_hyphenated_studio_is_detected():
+    studios = {"hussiepass": "HussiePass"}
+    out = clean_stem("hussie-pass-anastasia-shades-1080p", studios)
+    assert out == "HussiePass - Anastasia Shades"

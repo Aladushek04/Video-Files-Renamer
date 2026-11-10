@@ -21,9 +21,23 @@ import os
 import sqlite3
 import sys
 from collections.abc import Sequence
-from datetime import datetime, timezone
 
 from video_renamer.core.clean_ph_names import load_studios
+from video_renamer.core.fingerprint_sources import (
+    build_fingerprint_clients,
+    missing_secondary_keys,
+)
+from video_renamer.core.phash import PhashToolError, check_phash_tools
+from video_renamer.core.rename_log import (
+    ACTION_RENAME,
+    LogEntry,
+    _guard_formula,
+    _unguard_formula,
+    active_renames,
+    append_log,
+    format_log_timestamp,
+    read_log,
+)
 from video_renamer.core.stashdb_client import (
     StashDBAuthError,
     StashDBClient,
@@ -31,13 +45,9 @@ from video_renamer.core.stashdb_client import (
     StashDBResponseError,
     StashDBTransientError,
 )
-from video_renamer.core.fingerprint_sources import (
-    build_fingerprint_clients,
-    missing_secondary_keys,
-)
-from video_renamer.core.phash import PhashToolError, check_phash_tools
 from video_renamer.core.title_cache import TitleCache
 from video_renamer.core.title_service import ApplyResult, PreviewRow, TitleService
+from video_renamer.core.undo import run_undo, select_for_undo
 from video_renamer.paths import CACHE_PATH, LOG_PATH, STUDIOS_PATH, load_project_env
 
 __all__ = [
@@ -51,37 +61,12 @@ CSV_FIELDS = (
     "approved", "old", "new", "source", "confidence",
     "scene_id", "note", "oshash", "size",
 )
-LOG_FIELDS = ("timestamp", "old", "new", "oshash", "scene_id", "source")
 _APPROVED_VALUES = frozenset({"y", "yes", "1", "true"})
-_FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 DEFAULT_CSV = "preview.csv"
 DEFAULT_LOG = str(LOG_PATH)
 DEFAULT_STUDIOS = str(STUDIOS_PATH)
 DEFAULT_CACHE = str(CACHE_PATH)
-
-
-def _guard_formula(value: str) -> str:
-    """Экранирует значение, которое Excel принял бы за формулу.
-
-    Если значение уже начинается с апострофа, за которым идёт формульный
-    префикс, добавляется ещё один апостроф: так настоящий апостроф в имени
-    не путается с защитным.
-    """
-    if value.startswith(_FORMULA_PREFIXES) or (
-        value.startswith("'")
-        and value.lstrip("'").startswith(_FORMULA_PREFIXES)
-    ):
-        return "'" + value
-    return value
-
-
-def _unguard_formula(value: str) -> str:
-    """Снимает ровно один защитный апостроф, добавленный `_guard_formula`."""
-    if (value.startswith("'")
-            and value.lstrip("'").startswith(_FORMULA_PREFIXES)):
-        return value[1:]
-    return value
 
 
 def _parse_approved(value: object) -> bool:
@@ -130,7 +115,7 @@ def write_preview_csv(path: str, rows: Sequence[PreviewRow]) -> None:
                 row.scene_id,
                 _guard_formula(row.note),
                 row.oshash,
-                str(row.size),
+                "" if row.size is None else str(row.size),
             ))
 
 
@@ -170,43 +155,44 @@ def append_rename_log(
     rows: Sequence[PreviewRow],
     results: Sequence[ApplyResult],
     timestamp: str,
+    *,
+    root: str,
 ) -> None:
-    """Дописывает в лог только фактически переименованные строки.
+    """Дописывает в журнал только фактически переименованные строки.
 
-    Строка лога: `timestamp;old;new;oshash;scene_id;source`, где `new` —
-    фактическое имя из `ApplyResult` (с суффиксом коллизии, если он был
-    добавлен), а `oshash`/`scene_id`/`source` берутся из `PreviewRow`,
-    найденной по `old_rel`. Заголовок пишется один раз; BOM добавляется
-    только в новый файл, чтобы при дописывании он не попадал в середину.
+    `new` — фактическое имя из `ApplyResult` (с суффиксом коллизии, если он был
+    добавлен), `oshash`/`size`/`scene_id`/`source` — из `PreviewRow`, найденной
+    по `old_rel`. `root` — корневая папка, относительно которой заданы пути.
+    Запись выполняет `rename_log.append_log` (формат, миграция старого файла).
     """
     renamed = [result for result in results if result.status == "renamed"]
     if not renamed:
         return
 
     by_old = {row.old_rel: row for row in rows}
-    _ensure_parent(path)
-    exists = os.path.isfile(path) and os.path.getsize(path) > 0
-    mode = "a" if exists else "w"
-    encoding = "utf-8" if exists else "utf-8-sig"
-    with open(path, mode, encoding=encoding, newline="") as handle:
-        writer = csv.writer(handle, delimiter=";")
-        if not exists:
-            writer.writerow(LOG_FIELDS)
-        for result in renamed:
-            row = by_old.get(result.old_rel)
-            writer.writerow((
-                timestamp,
-                _guard_formula(result.old_rel),
-                _guard_formula(result.new_rel),
-                row.oshash if row is not None else "",
-                row.scene_id if row is not None else "",
-                row.source if row is not None else "",
-            ))
+    abs_root = os.path.abspath(root)
+    entries = []
+    for result in renamed:
+        row = by_old.get(result.old_rel)
+        entries.append(LogEntry(
+            timestamp=timestamp,
+            action=ACTION_RENAME,
+            undoes="",
+            root=abs_root,
+            old=result.old_rel,
+            new=result.new_rel,
+            oshash=row.oshash if row is not None else "",
+            size=row.size if row is not None else None,
+            scene_id=row.scene_id if row is not None else "",
+            source=row.source if row is not None else "",
+            legacy=False,
+        ))
+    append_log(path, entries)
 
 
 def _timestamp() -> str:
-    """Метка времени UTC в ISO 8601 для `rename_log.csv`."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    """Метка времени журнала: одна функция для CLI и TUI."""
+    return format_log_timestamp()
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -262,6 +248,23 @@ def _build_parser() -> argparse.ArgumentParser:
     apply.add_argument("--suffix-collisions", action="store_true",
                        help="add (2), (3) instead of failing on collisions")
     apply.set_defaults(handler=_run_apply)
+
+    undo = subparsers.add_parser(
+        "undo", help="list or undo applied renames from the journal"
+    )
+    undo.add_argument("--list", action="store_true",
+                      help="print active journal rows with their ids")
+    undo.add_argument("--ids", default=None,
+                      help="comma-separated ids to undo (see --list)")
+    undo.add_argument("--log", default=DEFAULT_LOG,
+                      help="rename log path (default: rename_log.csv)")
+    undo.add_argument("--root", default=None,
+                      help="folder for legacy rows without a stored root")
+    undo.add_argument("--apply", action="store_true",
+                      help="actually undo (default: dry-run)")
+    undo.add_argument("--confirm-legacy", action="store_true",
+                      help="allow undoing legacy rows (requires --root)")
+    undo.set_defaults(handler=_run_undo)
 
     return parser
 
@@ -423,7 +426,7 @@ def _run_apply(args: argparse.Namespace,
 
     if args.apply and renamed:
         try:
-            append_rename_log(args.log, rows, report.results, _timestamp())
+            append_rename_log(args.log, rows, report.results, _timestamp(), root=root)
         except OSError as exc:
             print(
                 f"error: cannot write rename log {args.log}: {exc}",
@@ -436,6 +439,54 @@ def _run_apply(args: argparse.Namespace,
         f"{mode}: {renamed} renamed, {skipped} skipped, {errors} error(s)"
     )
     return 1 if (report.had_errors or errors) else 0
+
+
+def _run_undo(args: argparse.Namespace,
+              parser: argparse.ArgumentParser) -> int:
+    """Список активных строк журнала или откат выбранных; по умолчанию dry-run."""
+    if not args.list and not args.ids:
+        print("error: undo needs --list or --ids", file=sys.stderr)
+        return 2
+
+    try:
+        entries = read_log(args.log)
+    except (OSError, ValueError, csv.Error) as exc:
+        print(f"error: cannot read rename log {args.log}: {exc}", file=sys.stderr)
+        return 2
+
+    if args.list:
+        for entry in active_renames(entries):
+            origin = entry.root or "(старый формат)"
+            print(f"{entry.id}\t{entry.old} -> {entry.new}\t{origin}\t{entry.timestamp}")
+        return 0
+
+    ids = [part for part in args.ids.split(",") if part.strip()]
+    root_override = os.path.abspath(args.root) if args.root else None
+    selection = select_for_undo(
+        entries, ids,
+        root_override=root_override,
+        confirm_legacy=args.confirm_legacy,
+    )
+    for error in selection.errors:
+        print(f"error: {error}", file=sys.stderr)
+
+    report = run_undo(selection, log_path=args.log, dry_run=not args.apply)
+    undone = 0
+    failed = 0
+    for result in report.results:
+        if result.status == "renamed":
+            undone += 1
+            print(f"undone: {result.old_rel} -> {result.new_rel}")
+        elif result.status == "dry-run":
+            undone += 1
+            print(f"would undo: {result.old_rel} -> {result.new_rel}")
+        else:
+            failed += 1
+            print(f"error: {result.id}: {result.message}", file=sys.stderr)
+
+    mode = "undo" if args.apply else "undo (dry-run)"
+    print(f"{mode}: {undone} undone, {failed + len(selection.errors)} error(s)")
+    return 1 if (selection.errors or report.had_errors) else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -29,7 +29,6 @@ from typing import Any
 
 from video_renamer.core.clean_ph_names import normalize_studio_key
 from video_renamer.core.env_file import load_env_file
-from video_renamer.core.studio_filters import filter_studio_names
 from video_renamer.core.stashdb_client import (
     StashDBAuthError,
     StashDBClient,
@@ -37,9 +36,9 @@ from video_renamer.core.stashdb_client import (
     StashDBTransientError,
     Studio,
 )
+from video_renamer.core.studio_filters import filter_studio_names
 
 __all__ = [
-    "Checkpoint",
     "DEFAULT_CHECKPOINT",
     "DEFAULT_DELAY",
     "DEFAULT_OUT",
@@ -48,6 +47,7 @@ __all__ = [
     "FANSDB_SOURCE",
     "STASHDB_SOURCE",
     "THEPORNDB_SOURCE",
+    "Checkpoint",
     "ScrapeReport",
     "ScraperGapError",
     "StudioSource",

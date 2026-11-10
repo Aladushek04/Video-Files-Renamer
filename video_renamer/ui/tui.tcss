@@ -253,10 +253,22 @@ ModalScreen {
     margin-left: 1;
 }
 
-#picker-tree {
+#picker-path {
+    background: #111c33;
+    color: #e2e8f0;
+    border: tall #1e3a5f;
+    margin-top: 1;
+}
+
+#picker-list {
     height: 1fr;
     background: #0b1020;
     border: round #1e293b;
+    margin-top: 1;
+}
+
+#picker-list > .option-list--option-highlighted {
+    background: #164e63;
 }
 
 #error-list {

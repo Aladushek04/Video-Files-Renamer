@@ -1,7 +1,7 @@
 """Тесты слияния нескольких JSON-справочников студий."""
 import json
 
-from video_renamer.merge_studios import merge_studio_dicts, merge_studio_files
+from video_renamer.scrapers.merge_studios import merge_studio_dicts, merge_studio_files
 
 
 def test_merge_studio_dicts_keeps_first_seen_and_reports_collisions():

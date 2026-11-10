@@ -19,7 +19,7 @@ from video_renamer.scrapers.stashdb import (
     merge_studios,
 )
 
-__all__ = ["merge_studio_dicts", "merge_studio_files", "main"]
+__all__ = ["main", "merge_studio_dicts", "merge_studio_files"]
 
 
 def _read_dict(path: str) -> dict[str, str]:
@@ -88,7 +88,7 @@ def merge_studio_files(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m video_renamer.merge_studios",
+        prog="python -m video_renamer.scrapers.merge_studios",
         description="Merge studio JSON dictionaries, first value wins.",
     )
     parser.add_argument("inputs", nargs="+", help="studio JSON files to merge")

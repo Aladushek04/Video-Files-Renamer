@@ -29,23 +29,37 @@ classifiers = [
 
 [project.optional-dependencies]
 tui = ["textual>=8.2,<9"]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.17"]
 
 [project.scripts]
 video-renamer = "video_renamer.cli:main"
-video-renamer-tui = "video_renamer.tui:main"
+video-renamer-tui = "video_renamer.ui.tui:main"
 scrape-stashdb = "video_renamer.scrapers.stashdb:main"
 scrape-fansdb = "video_renamer.scrapers.fansdb:main"
 scrape-theporndb = "video_renamer.scrapers.theporndb:main"
-merge-studios = "video_renamer.merge_studios:main"
+merge-studios = "video_renamer.scrapers.merge_studios:main"
 
 [tool.setuptools.packages.find]
 include = ["video_renamer*"]
 
 [tool.setuptools.package-data]
-video_renamer = ["tui.tcss"]
+"video_renamer.ui" = ["tui.tcss"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = [".venv"]
+
+[tool.ruff.lint.per-file-ignores]
+# Воркеры TUI ловят Exception намеренно: ошибка фонового потока должна попасть
+# в лог приложения, а не уронить интерфейс.
+"video_renamer/ui/tui.py" = ["BLE001"]
+# Здесь ValueError описывает битый JSON/checkpoint, а не неверный тип аргумента.
+"video_renamer/scrapers/merge_studios.py" = ["TRY004"]
+"video_renamer/scrapers/stashdb.py" = ["TRY004"]
+"video_renamer/scrapers/theporndb.py" = ["TRY004"]

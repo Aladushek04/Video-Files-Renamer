@@ -1,8 +1,8 @@
 """Чистая модель TUI: фильтры, отметки и статистика без Textual."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from typing import Iterable
 
 from video_renamer.core.title_service import PreviewRow
 

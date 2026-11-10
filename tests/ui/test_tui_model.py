@@ -1,6 +1,6 @@
 """Тесты модели TUI без зависимости от Textual."""
-from video_renamer.tui_model import ReviewModel
 from video_renamer.core.title_service import PreviewRow
+from video_renamer.ui.tui_model import ReviewModel
 
 
 def row(source="text", approved=False, old="old.mp4", new="new.mp4"):
@@ -19,7 +19,6 @@ def test_filter_and_toggle():
     assert [item.source for _, item in model.visible()] == ["text", "heuristic"]
     model.filter = "text"
     assert len(model.visible()) == 1
-    _, visible = model.visible()[0]
     assert model.toggle(1).approved is True
     assert model.approved_rows()[0].old_rel == "old.mp4"
 

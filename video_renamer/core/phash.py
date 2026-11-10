@@ -26,8 +26,8 @@ __all__ = [
     "PhashToolError",
     "build_montage",
     "check_phash_tools",
-    "decode_bmp",
     "dct_top_left_8x8",
+    "decode_bmp",
     "extract_frame",
     "format_phash",
     "frame_times",
@@ -184,8 +184,8 @@ def resize_bilinear(gray: list[list[float]], out_w: int, out_h: int) -> list[lis
         table = []
         for i in range(out_len):
             center = (i + 0.5) * scale - 0.5
-            lo = max(0, int(math.floor(center - scale)))
-            hi = min(in_len - 1, int(math.ceil(center + scale)))
+            lo = max(0, math.floor(center - scale))
+            hi = min(in_len - 1, math.ceil(center + scale))
             taps = []
             total = 0.0
             for j in range(lo, hi + 1):

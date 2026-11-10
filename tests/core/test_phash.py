@@ -10,8 +10,8 @@ from video_renamer.core.phash import (
     PhashToolError,
     build_montage,
     check_phash_tools,
-    decode_bmp,
     dct_top_left_8x8,
+    decode_bmp,
     extract_frame,
     format_phash,
     frame_times,
@@ -185,7 +185,7 @@ def test_phash_matches_stashdb_reference_within_threshold():
         ffmpeg=_ffmpeg_binary("ffmpeg"),
         ffprobe=_ffmpeg_binary("ffprobe"),
     )
-    assert bin(value ^ REFERENCE_PHASH).count("1") <= 4
+    assert (value ^ REFERENCE_PHASH).bit_count() <= 4
 
 
 def test_phash_from_path_retries_failed_fast_seek_with_accurate_seek():

@@ -8,6 +8,9 @@ _KEEP_PAREN = re.compile(r"\((remastered|part\s*\d+)\)", re.IGNORECASE)
 _TECH_PAREN = re.compile(r"\(\s*\d{1,4}\s*\)")
 _TECH_WORD = re.compile(r"(?i)\b(1080p|720p|2160p|4320p|4k|8k|uhd|hd|fullhd|full-hd|xxx)\b")
 _SEP = re.compile(r"[._+]+")
+_HYPHEN = re.compile(r"-+")
+_BLOCK_SEP = " - "
+_BLOCK_SENTINEL = "\x01"
 _WS = re.compile(r"\s+")
 _EMPTY_PAREN = re.compile(r"\(\s*\)")
 _DATE_YMD4 = re.compile(r"\(?(\d{4})[.-](\d{2})[.-](\d{2})\)?")
@@ -27,7 +30,13 @@ def split_name(filename: str) -> tuple:
 
 
 def strip_tech_junk(stem: str) -> str:
-    """Режет техмусор, чистит разделители. Скобки (Remastered)/(Part N) сохраняет."""
+    """Режет техмусор, чистит разделители. Скобки (Remastered)/(Part N) сохраняет.
+
+    Разделителями считаются `.`, `_`, `+` и `-`: `veronica-leal` превращается
+    в `veronica leal`. Уже готовый блочный разделитель ` - ` сохраняется,
+    чтобы не терять структуру `Студия - Дата - Актёры - Название`. Дефисы
+    режутся после техмусора, чтобы `full-hd` и `Title-1080p` резались целиком.
+    """
     keepers = []
 
     def _hold(m):
@@ -39,6 +48,9 @@ def strip_tech_junk(stem: str) -> str:
     s = _TECH_PAREN.sub(" ", s)
     s = _TECH_WORD.sub(" ", s)
     s = _EMPTY_PAREN.sub(" ", s)
+    s = s.replace(_BLOCK_SEP, _BLOCK_SENTINEL)
+    s = _HYPHEN.sub(" ", s)
+    s = s.replace(_BLOCK_SENTINEL, _BLOCK_SEP)
     s = _WS.sub(" ", s).strip(" -")
     for i, k in enumerate(keepers):
         s = s.replace(f"\x00{i}\x00", k)
@@ -273,115 +285,3 @@ def _cap_length(base: str, suffix: str) -> str:
         base = base[:keep].rstrip(" -")
         full = base + suffix
     return full
-
-
-def clean_filename(filename: str, studios: dict) -> str:
-    """Чистит одно имя, суффикс сохраняет как есть. Пустой результат -> исходное."""
-    stem, suffix = split_name(filename)
-    if not stem:
-        return filename
-    new_stem = clean_stem(stem, studios)
-    if not new_stem:
-        return filename
-    new_stem = _WS.sub(" ", new_stem).strip(" -")
-    return _cap_length(new_stem, suffix)
-
-
-def _iter_files(directory: str, recursive: bool):
-    if recursive:
-        for root, _, files in os.walk(directory):
-            for f in sorted(files):
-                yield os.path.join(root, f)
-    else:
-        for f in sorted(os.listdir(directory)):
-            p = os.path.join(directory, f)
-            if os.path.isfile(p):
-                yield p
-
-
-def preview_directory(directory: str, studios: dict, recursive: bool = False) -> list:
-    """Список (old_rel, new_rel) без записи. Коллизии -> ' (2)' в пределах папки."""
-    rows = []
-    used_per_dir: dict = {}
-    for path in _iter_files(directory, recursive):
-        rel = os.path.relpath(path, directory)
-        parent = os.path.dirname(rel)
-        old_base = os.path.basename(rel)
-        new_base = clean_filename(old_base, studios)
-        base, suffix = os.path.splitext(new_base)
-        used = used_per_dir.setdefault(parent, set())
-        cand, n = new_base, 2
-        while cand.lower() in used:
-            cand = _cap_length(f"{base} ({n})", suffix)
-            n += 1
-        used.add(cand.lower())
-        new_rel = os.path.join(parent, cand) if parent else cand
-        rows.append((rel, new_rel))
-    return rows
-
-
-def apply_renames(directory: str, rows: list) -> list:
-    """Двухфазное переименование: сначала во временные, потом в финальные."""
-    todo = [(o, n) for o, n in rows if o != n]
-    if not todo:
-        return []
-    tmp_map = []
-    for i, (old_rel, new_rel) in enumerate(todo):
-        src = os.path.join(directory, old_rel)
-        tmp = os.path.join(directory, os.path.dirname(old_rel), f"__ren_tmp_{i}.tmp")
-        os.rename(src, tmp)
-        tmp_map.append((tmp, os.path.join(directory, new_rel)))
-    done = []
-    for tmp, dst in tmp_map:
-        os.makedirs(os.path.dirname(dst) or directory, exist_ok=True)
-        base, suffix = os.path.splitext(os.path.basename(dst))
-        cand, n = dst, 2
-        while os.path.exists(cand):
-            cand = os.path.join(os.path.dirname(dst), _cap_length(f"{base} ({n})", suffix))
-            n += 1
-        os.rename(tmp, cand)
-        done.append((tmp, cand))
-    return done
-
-
-def main() -> None:
-    import argparse
-    import csv
-    import sys
-
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-
-    here = os.path.dirname(os.path.abspath(__file__))
-    ap = argparse.ArgumentParser(description="Чистит мусорные имена в 'Студия - ДД.ММ.ГГГГ - Актеры - Название'.")
-    ap.add_argument("directory", help="Папка с файлами")
-    ap.add_argument("--apply", action="store_true", help="Реально переименовать (без флага — dry-run)")
-    ap.add_argument("--csv", default="preview.csv", help="Куда писать preview")
-    ap.add_argument("--recursive", action="store_true", help="Обходить подпапки")
-    ap.add_argument("--studios", default=os.path.join(here, "studios.json"), help="Путь к studios.json")
-    args = ap.parse_args()
-    studios = load_studios(args.studios) if os.path.isfile(args.studios) else {}
-    rows = preview_directory(args.directory, studios, recursive=args.recursive)
-    with open(args.csv, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.writer(f, delimiter=";")
-        w.writerow(["old", "new"])
-        w.writerows(rows)
-    for old, new in rows:
-        mark = "OK " if old == new else ("RENAME" if args.apply else "DRY  ")
-        print(f"{mark} {old} -> {new}")
-    if not args.apply:
-        print(f"Dry-run done. CSV: {args.csv}. Add --apply to rename.")
-        return
-    for old_rel, new_rel in rows:
-        if old_rel == new_rel:
-            print(f"OK {old_rel} -> {new_rel}")
-    moved = apply_renames(args.directory, rows)
-    for old_rel, new_rel in rows:
-        if old_rel != new_rel:
-            print(f"OK {old_rel} -> {new_rel}")
-
-
-if __name__ == "__main__":
-    main()

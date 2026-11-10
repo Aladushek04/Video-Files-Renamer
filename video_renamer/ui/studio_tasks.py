@@ -37,7 +37,7 @@ def _command(kind: str) -> list[str]:
         return [
             python,
             "-m",
-            "video_renamer.merge_studios",
+            "video_renamer.scrapers.merge_studios",
             *MERGE_INPUTS,
             "--out",
             "data/studios.json",

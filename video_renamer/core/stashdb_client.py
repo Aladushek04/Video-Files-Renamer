@@ -36,11 +36,11 @@ BACKOFF_SECONDS = (1, 3, 9)
 
 __all__ = [
     "FINGERPRINT_BATCH_SIZE",
-    "Performer",
     "SCENES_BY_FINGERPRINTS_QUERY",
     "SEARCH_SCENES_QUERY",
     "STASHDB_ENDPOINT",
     "STUDIOS_QUERY",
+    "Performer",
     "Scene",
     "StashDBAuthError",
     "StashDBClient",

@@ -8,19 +8,21 @@ import pytest
 
 pytest.importorskip("textual")
 
-from video_renamer.core.stashdb_client import (  # noqa: E402
+from textual.widgets import Input, OptionList
+
+from video_renamer.core.oshash import oshash_from_path
+from video_renamer.core.stashdb_client import (
     Performer,
     Scene,
     Studio,
 )
-from video_renamer.core.oshash import oshash_from_path  # noqa: E402
-from video_renamer.core.title_service import (  # noqa: E402
+from video_renamer.core.title_service import (
     ApplyReport,
     ApplyResult,
     PreviewReport,
     PreviewRow,
 )
-from video_renamer.tui import RenamerApp  # noqa: E402
+from video_renamer.ui.tui import DirectoryPicker, RenamerApp
 
 ROWS = (
     PreviewRow(
@@ -86,6 +88,206 @@ def test_app_previews_and_toggles_rows(tmp_path):
     asyncio.run(run())
 
 
+def _rename_log_with(tmp_path, old="a.mp4", new="b.mp4"):
+    from video_renamer.core.rename_log import LogEntry, append_log, format_log_timestamp
+
+    log = tmp_path / "rename_log.csv"
+    append_log(str(log), [LogEntry(
+        timestamp=format_log_timestamp(), action="rename", undoes="",
+        root=str(tmp_path), old=old, new=new, oshash=oshash_from_path(str(tmp_path / new)),
+        size=100, scene_id="s1", source="fingerprint", legacy=False,
+    )])
+    return log
+
+
+def test_undo_screen_lists_active_rows(tmp_path):
+    (tmp_path / "b.mp4").write_bytes(b"b" * 100)
+    log = _rename_log_with(tmp_path)
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#table")
+            await pilot.press("u")
+            await pilot.pause()
+            assert app.screen.query_one("#undo-table").row_count == 1
+
+    asyncio.run(run())
+
+
+def test_legacy_undo_needs_checkbox(tmp_path):
+    (tmp_path / "b.mp4").write_bytes(b"b" * 100)
+    legacy = tmp_path / "rename_log.csv"
+    legacy.write_text(
+        "timestamp;old;new;oshash;scene_id;source\n"
+        f"2026-11-04T12:00:00Z;a.mp4;b.mp4;{oshash_from_path(str(tmp_path / 'b.mp4'))};s;fingerprint\n",
+        encoding="utf-8-sig",
+    )
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(legacy))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#table")
+            await pilot.press("u")
+            await pilot.pause()
+            await pilot.click("#undo-table")
+            await pilot.press("space")
+            await pilot.click("#undo-run")
+            await pilot.pause()
+            assert app.screen.query_one("#undo-confirm").disabled is True
+            await pilot.click("#undo-legacy-ack")
+            await pilot.pause()
+            assert app.screen.query_one("#undo-confirm").disabled is False
+
+    asyncio.run(run())
+
+
+def test_undo_confirmed_restores_file(tmp_path):
+    (tmp_path / "b.mp4").write_bytes(b"b" * 100)
+    log = _rename_log_with(tmp_path)
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#table")
+            await pilot.press("u")
+            await pilot.pause()
+            await pilot.click("#undo-table")
+            await pilot.press("space")
+            await pilot.click("#undo-run")
+            await pilot.pause()
+            await pilot.click("#undo-confirm")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert (tmp_path / "a.mp4").exists()
+            assert not (tmp_path / "b.mp4").exists()
+
+    asyncio.run(run())
+
+
+def test_undo_screen_survives_unreadable_log(tmp_path, monkeypatch):
+    import csv as csv_module
+
+    from video_renamer.ui import tui as tui_module
+
+    def broken(path):
+        raise csv_module.Error("line too long")
+
+    monkeypatch.setattr(tui_module, "read_log", broken)
+    log = tmp_path / "rename_log.csv"
+    log.write_text("x", encoding="utf-8")
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#table")
+            await pilot.press("u")
+            await pilot.pause()
+            assert "Не удалось прочитать журнал" in app.screen.status_message
+
+    asyncio.run(run())
+
+
+def test_undo_worker_error_is_shown_not_fatal(tmp_path, monkeypatch):
+    from video_renamer.core.undo import run_undo as real_run_undo
+    from video_renamer.ui import tui as tui_module
+
+    def failing(selection, *, log_path, dry_run, now=None):
+        if dry_run:
+            return real_run_undo(selection, log_path=log_path, dry_run=True, now=now)
+        raise RuntimeError("disk gone")
+
+    monkeypatch.setattr(tui_module, "run_undo", failing)
+    (tmp_path / "b.mp4").write_bytes(b"b" * 100)
+    log = _rename_log_with(tmp_path)
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#table")
+            await pilot.press("u")
+            await pilot.pause()
+            await pilot.click("#undo-table")
+            await pilot.press("space")
+            await pilot.click("#undo-run")
+            await pilot.pause()
+            await pilot.click("#undo-confirm")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.is_running
+            assert "Откат не выполнен: disk gone" in app.screen.status_message
+
+    asyncio.run(run())
+
+
+def test_undo_shows_unwritten_journal_rows(tmp_path, monkeypatch):
+    from video_renamer.core.undo import UndoReport, UndoResult
+    from video_renamer.core.undo import run_undo as real_run_undo
+    from video_renamer.ui import tui as tui_module
+
+    def unwritten(selection, *, log_path, dry_run, now=None):
+        if dry_run:
+            return real_run_undo(selection, log_path=log_path, dry_run=True, now=now)
+        target = selection.targets[0].entry
+        return UndoReport((UndoResult(
+            target.id, target.new, target.old, "journal-missing",
+            "откат выполнен, журнал не записан: locked",
+        ),), True)
+
+    monkeypatch.setattr(tui_module, "run_undo", unwritten)
+    (tmp_path / "b.mp4").write_bytes(b"b" * 100)
+    log = _rename_log_with(tmp_path)
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#table")
+            await pilot.press("u")
+            await pilot.pause()
+            await pilot.click("#undo-table")
+            await pilot.press("space")
+            await pilot.click("#undo-run")
+            await pilot.pause()
+            await pilot.click("#undo-confirm")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert "журнал не записан" in app.screen.status_message
+
+    asyncio.run(run())
+
+
+def test_undo_screen_ignores_callbacks_after_close(tmp_path):
+    from video_renamer.ui.tui import UndoLogScreen
+
+    screen = UndoLogScreen(str(tmp_path / "x.csv"), str(tmp_path))
+    screen._undo_done(1, [])
+    screen._undo_failed("late error")
+
+
+def test_legacy_confirm_shows_root_folder(tmp_path):
+    (tmp_path / "b.mp4").write_bytes(b"b" * 100)
+    legacy = tmp_path / "rename_log.csv"
+    legacy.write_text(
+        "timestamp;old;new;oshash;scene_id;source\n"
+        f"2026-11-04T12:00:00Z;a.mp4;b.mp4;{oshash_from_path(str(tmp_path / 'b.mp4'))};s;fingerprint\n",
+        encoding="utf-8-sig",
+    )
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(legacy))
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.click("#table")
+            await pilot.press("u")
+            await pilot.pause()
+            await pilot.click("#undo-table")
+            await pilot.press("space")
+            await pilot.click("#undo-run")
+            await pilot.pause()
+            assert str(tmp_path) in app.screen.body_text
+
+    asyncio.run(run())
+
+
 def test_app_apply_modal_runs_fake_apply(tmp_path):
     from video_renamer.core.title_service import ApplyReport
 
@@ -136,7 +338,7 @@ def test_confirm_apply_explains_rename_is_irreversible(tmp_path):
 
 
 def test_apply_log_failure_does_not_hide_results(tmp_path, monkeypatch):
-    import video_renamer.tui as tui_module
+    import video_renamer.ui.tui as tui_module
 
     def broken_log(*args, **kwargs):
         raise OSError("disk full")
@@ -429,7 +631,7 @@ def test_candidate_picker_chooses_alternative(tmp_path):
 
 
 def test_studio_dialog_runs_task(tmp_path, monkeypatch):
-    import video_renamer.tui as tui_module
+    import video_renamer.ui.tui as tui_module
 
     seen = []
 
@@ -457,8 +659,74 @@ def test_studio_dialog_runs_task(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def test_folder_input_is_empty_and_has_placeholder(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    async def run() -> None:
+        app = RenamerApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            folder = app.query_one("#folder", Input)
+            assert folder.value == ""
+            assert folder.placeholder == "Выберите папку"
+
+    asyncio.run(run())
+
+
+def test_directory_picker_navigates_into_subfolder_and_chooses_it(tmp_path):
+    target = tmp_path / "Videos"
+    target.mkdir()
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(tmp_path))
+        async with app.run_test(size=(140, 40)) as pilot:
+            app.action_browse()
+            await pilot.pause()
+            picker = app.screen
+            assert isinstance(picker, DirectoryPicker)
+
+            options = picker.query_one("#picker-list", OptionList)
+            index = next(
+                i for i in range(options.option_count)
+                if options.get_option_at_index(i).id == str(target)
+            )
+            options.highlighted = index
+            options.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert picker.path == target
+
+            await pilot.click("#picker-choose")
+            await pilot.pause()
+            assert app.folder == target
+            assert app.query_one("#folder", Input).value == str(target)
+
+    asyncio.run(run())
+
+
+def test_directory_picker_goes_up_to_parent(tmp_path):
+    start = tmp_path / "child"
+    start.mkdir()
+
+    async def run() -> None:
+        app = RenamerApp(folder=str(start))
+        async with app.run_test(size=(140, 40)) as pilot:
+            app.action_browse()
+            await pilot.pause()
+            picker = app.screen
+            assert isinstance(picker, DirectoryPicker)
+            options = picker.query_one("#picker-list", OptionList)
+            options.highlighted = 0
+            options.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert picker.path == tmp_path
+
+    asyncio.run(run())
+
+
 def test_studio_dialog_cancels_task(tmp_path, monkeypatch):
-    import video_renamer.tui as tui_module
+    import video_renamer.ui.tui as tui_module
 
     started = threading.Event()
 

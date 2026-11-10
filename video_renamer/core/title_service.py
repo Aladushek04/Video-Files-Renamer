@@ -57,8 +57,8 @@ from video_renamer.core.title_matcher import (
 __all__ = [
     "ApplyReport",
     "ApplyResult",
-    "PreviewRow",
     "PreviewReport",
+    "PreviewRow",
     "ProgressEvent",
     "TitleService",
     "iter_video_files",
@@ -84,7 +84,7 @@ class PreviewRow:
     scene_id: str
     note: str
     oshash: str
-    size: int
+    size: int | None
     candidates: tuple[Scene, ...] = ()
 
 
@@ -283,8 +283,7 @@ def _collision_name(stem: str, suffix: str, number: int) -> str:
     """
     marker = "" if number <= 1 else f" ({number})"
     room = _MAX_FULL_NAME - len(suffix) - len(marker)
-    if room < 0:
-        room = 0
+    room = max(room, 0)
     if len(stem) > room:
         stem = stem[:room].rstrip(" -")
     return _cap_length(stem + marker, suffix)
@@ -622,7 +621,7 @@ class TitleService:
             return None, "old path is not a regular file"
 
         if not force:
-            if source_stat.st_size != row.size:
+            if row.size is not None and source_stat.st_size != row.size:
                 return None, (
                     f"stale size: expected {row.size}, "
                     f"actual {source_stat.st_size}"
