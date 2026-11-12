@@ -31,15 +31,13 @@ from video_renamer.core.fingerprint_sources import (
 from video_renamer.core.performer_names import PerformerIndex
 from video_renamer.core.phash import PhashToolError, check_phash_tools
 from video_renamer.core.rename_log import (
-    ACTION_RENAME,
-    LogEntry,
     _guard_formula,
     _unguard_formula,
     active_renames,
-    append_log,
     format_log_timestamp,
     read_log,
 )
+from video_renamer.core.review_actions import append_rename_log
 from video_renamer.core.stashdb_client import (
     StashDBAuthError,
     StashDBClient,
@@ -48,7 +46,7 @@ from video_renamer.core.stashdb_client import (
     StashDBTransientError,
 )
 from video_renamer.core.title_cache import TitleCache
-from video_renamer.core.title_service import ApplyResult, PreviewRow, TitleService
+from video_renamer.core.title_service import PreviewRow, TitleService
 from video_renamer.core.undo import run_undo, select_for_undo
 from video_renamer.paths import (
     CACHE_PATH,
@@ -164,48 +162,6 @@ def read_preview_csv(path: str) -> list[PreviewRow]:
                 )
             )
     return rows
-
-
-def append_rename_log(
-    path: str,
-    rows: Sequence[PreviewRow],
-    results: Sequence[ApplyResult],
-    timestamp: str,
-    *,
-    root: str,
-) -> None:
-    """Дописывает в журнал только фактически переименованные строки.
-
-    `new` — фактическое имя из `ApplyResult` (с суффиксом коллизии, если он был
-    добавлен), `oshash`/`size`/`scene_id`/`source` — из `PreviewRow`, найденной
-    по `old_rel`. `root` — корневая папка, относительно которой заданы пути.
-    Запись выполняет `rename_log.append_log` (формат, миграция старого файла).
-    """
-    renamed = [result for result in results if result.status == "renamed"]
-    if not renamed:
-        return
-
-    by_old = {row.old_rel: row for row in rows}
-    abs_root = os.path.abspath(root)
-    entries = []
-    for result in renamed:
-        row = by_old.get(result.old_rel)
-        entries.append(
-            LogEntry(
-                timestamp=timestamp,
-                action=ACTION_RENAME,
-                undoes="",
-                root=abs_root,
-                old=result.old_rel,
-                new=result.new_rel,
-                oshash=row.oshash if row is not None else "",
-                size=row.size if row is not None else None,
-                scene_id=row.scene_id if row is not None else "",
-                source=row.source if row is not None else "",
-                legacy=False,
-            )
-        )
-    append_log(path, entries)
 
 
 def _timestamp() -> str:

@@ -37,18 +37,20 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from video_renamer.cli import append_rename_log
-from video_renamer.core.clean_ph_names import load_studios
-from video_renamer.core.fingerprint_sources import build_fingerprint_clients
-from video_renamer.core.performer_names import PerformerIndex
 from video_renamer.core.rename_log import (
     active_renames,
-    format_log_timestamp,
     read_log,
 )
-from video_renamer.core.stashdb_client import Scene, StashDBClient
-from video_renamer.core.title_cache import TitleCache
-from video_renamer.core.title_matcher import is_valid_final_stem
+from video_renamer.core.review_actions import (
+    apply_rows,
+    basename_new_rel,
+    build_service,
+    load_performer_index,
+    remove_renamed,
+    run_preview,
+    validate_basename,
+)
+from video_renamer.core.stashdb_client import Scene
 from video_renamer.core.title_service import (
     ApplyReport,
     PreviewReport,
@@ -58,9 +60,7 @@ from video_renamer.core.title_service import (
 )
 from video_renamer.core.undo import run_undo, select_for_undo
 from video_renamer.paths import (
-    CACHE_PATH,
     LOG_PATH,
-    PERFORMERS_INDEX_PATH,
     STUDIOS_PATH,
     load_project_env,
 )
@@ -251,11 +251,12 @@ class ConfirmApply(ModalScreen[bool]):
 
     BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "cancel", "Отмена")]
 
-    def __init__(self, folder: str, count: int, sources: dict[str, int]) -> None:
+    def __init__(self, folder: str, count: int, sources: dict[str, int], log_path: str) -> None:
         super().__init__()
         self.folder = folder
         self.count = count
         self.sources = sources
+        self.log_path = log_path
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-dialog"):
@@ -267,7 +268,7 @@ class ConfirmApply(ModalScreen[bool]):
                 f"Текст: {self.sources.get('text', 0)} · "
                 f"Эвристика: {self.sources.get('heuristic', 0)}\n\n"
                 "Переименование выполняется сразу, отменить его нельзя. "
-                f"Журнал операций: {LOG_PATH}.",
+                f"Журнал операций: {self.log_path}.",
                 classes="modal-body",
                 id="confirm-body",
             )
@@ -454,27 +455,9 @@ class NameEditor(ModalScreen[str | None]):
     def _save(self) -> None:
         value = self.query_one("#new-name", Input).value.strip()
         error = self.query_one("#name-error", Static)
-        suffix = os.path.splitext(self.row.old_rel)[1]
-        if not value:
-            error.update(Text("Имя не может быть пустым.", style="#f87171"))
-            return
-        if "/" in value or "\\" in value:
-            error.update(Text("Подпапки запрещены.", style="#f87171"))
-            return
-        value_suffix = os.path.splitext(value)[1]
-        if value_suffix.casefold() != suffix.casefold():
-            error.update(
-                Text(
-                    f"Расширение должно совпадать с исходным: {suffix} (регистр не важен).",
-                    style="#f87171",
-                )
-            )
-            return
-        if len(value) > 255:
-            error.update(Text("Имя длиннее 255 символов.", style="#f87171"))
-            return
-        if not is_valid_final_stem(os.path.splitext(value)[0]):
-            error.update(Text("Недопустимое имя для Windows.", style="#f87171"))
+        message = validate_basename(self.row, value)
+        if message:
+            error.update(Text(message, style="#f87171"))
             return
         self.dismiss(value)
 
@@ -830,14 +813,14 @@ class RenamerApp(App[None]):
         *,
         preview_factory: Callable[[str, Callable], PreviewReport] | None = None,
         apply_factory: Callable[[list[PreviewRow]], ApplyReport] | None = None,
-        undo_log_path: str | None = None,
+        log_path: str | None = None,
     ) -> None:
         super().__init__()
         self.folder: Path | None = Path(folder) if folder else None
         self.model = ReviewModel(str(self.folder) if self.folder else "", [])
         self._preview_factory = preview_factory
         self._apply_factory = apply_factory
-        self.undo_log_path = undo_log_path or str(LOG_PATH)
+        self.log_path = log_path or str(LOG_PATH)
         self._busy = False
         self.key = ""
         self._service: TitleService | None = None
@@ -1035,26 +1018,11 @@ class RenamerApp(App[None]):
     def _get_service(self) -> TitleService:
         if self._service is not None:
             return self._service
-        studios_path = STUDIOS_PATH
-        studios = load_studios(str(studios_path)) if studios_path.exists() else {}
-        self._service = TitleService(
+        self._service = build_service(
             self.model.folder,
-            studios,
-            None,
-            None,
-            performers=self._load_performers(),
+            performers=load_performer_index(),
         )
         return self._service
-
-    @staticmethod
-    def _load_performers() -> PerformerIndex | None:
-        """Индекс имён, если он собран; иначе разбор без справочника."""
-        if not PERFORMERS_INDEX_PATH.exists():
-            return None
-        try:
-            return PerformerIndex.load(str(PERFORMERS_INDEX_PATH))
-        except (OSError, ValueError, TypeError):
-            return None
 
     def invalidate_services(self) -> None:
         """Сбрасывает справочник после обновления студий."""
@@ -1135,25 +1103,15 @@ class RenamerApp(App[None]):
         if self._preview_factory is not None:
             return self._preview_factory(folder, progress)
 
-        studios_path = STUDIOS_PATH
-        studios = load_studios(str(studios_path)) if studios_path.exists() else {}
-        cache = TitleCache(str(CACHE_PATH))
-        client = StashDBClient(self.key) if self.key else None
-        try:
-            service = TitleService(
-                folder,
-                studios,
-                cache,
-                client,
-                offline=not bool(self.key),
-                progress=progress,
-                extra_clients=build_fingerprint_clients(os.environ, offline=not bool(self.key)),
-                performers=self._load_performers(),
-            )
-            self._service = service
-            return service.preview()
-        finally:
-            cache.close()
+        return run_preview(
+            folder,
+            api_key=self.key,
+            progress=progress,
+            service_callback=self._remember_service,
+        )
+
+    def _remember_service(self, service: TitleService) -> None:
+        self._service = service
 
     @work(thread=True, exclusive=True)
     def _preview_worker(self, folder: str) -> None:
@@ -1205,7 +1163,7 @@ class RenamerApp(App[None]):
     def action_undo_log(self) -> None:
         if isinstance(self.screen, ModalScreen):
             return
-        self.push_screen(UndoLogScreen(self.undo_log_path, str(self.model.folder)))
+        self.push_screen(UndoLogScreen(self.log_path, str(self.model.folder)))
 
     def action_studios(self) -> None:
         if self._busy:
@@ -1257,9 +1215,7 @@ class RenamerApp(App[None]):
         if not value:
             return
         row = self.model.rows[index]
-        parent = os.path.dirname(row.old_rel)
-        new_rel = os.path.join(parent, value) if parent else value
-        self.model.set_new_rel(index, new_rel, approved=True)
+        self.model.set_new_rel(index, basename_new_rel(row, value), approved=True)
         self._refresh_table()
         self._select_index(index)
         self.notify("Имя изменено вручную", timeout=4)
@@ -1301,7 +1257,7 @@ class RenamerApp(App[None]):
         for row in approved:
             sources[row.source] = sources.get(row.source, 0) + 1
         self.push_screen(
-            ConfirmApply(self.model.folder, len(approved), sources),
+            ConfirmApply(self.model.folder, len(approved), sources, self.log_path),
             self._apply_confirmed,
         )
 
@@ -1324,26 +1280,12 @@ class RenamerApp(App[None]):
         """Переименовывает строки; сбой журнала не отменяет результат apply."""
         if self._apply_factory is not None:
             return self._apply_factory(rows), ""
-        service = TitleService(self.model.folder, {}, None, None)
-        report = service.apply_rows(rows, dry_run=False)
-        log_error = ""
-        if any(result.status == "renamed" for result in report.results):
-            try:
-                append_rename_log(
-                    str(LOG_PATH),
-                    rows,
-                    report.results,
-                    format_log_timestamp(),
-                    root=str(self.model.folder),
-                )
-            except Exception as exc:
-                log_error = str(exc) or exc.__class__.__name__
-        return report, log_error
+        return apply_rows(str(self.model.folder), rows, log_path=self.log_path)
 
     def _apply_done(self, report: ApplyReport, log_error: str = "") -> None:
         self._set_busy(False)
         renamed = {result.old_rel for result in report.results if result.status == "renamed"}
-        kept = [row for row in self.model.rows if not row.approved or row.old_rel not in renamed]
+        kept = remove_renamed(self.model.rows, report)
         self.model.set_rows(kept)
         self._refresh_table()
         if log_error:
@@ -1357,7 +1299,7 @@ class RenamerApp(App[None]):
             self._set_status(f"Применено: {len(renamed)}; строк с ошибками осталось: {len(kept)}")
         else:
             self._set_status(f"Применено: {len(renamed)}")
-        self.push_screen(ApplyResultModal(report, log_path=str(LOG_PATH), log_error=log_error))
+        self.push_screen(ApplyResultModal(report, log_path=str(self.log_path), log_error=log_error))
 
     def _apply_failed(self, exc: Exception) -> None:
         self._set_busy(False)

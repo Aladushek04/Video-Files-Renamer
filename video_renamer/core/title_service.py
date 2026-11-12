@@ -25,10 +25,12 @@ subprocess — это задача CLI/TUI.
 import ntpath
 import os
 import stat
+import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from uuid import uuid4
 
+from video_renamer.core.cancellation import OperationCancelled
 from video_renamer.core.clean_ph_names import _cap_length
 from video_renamer.core.fingerprint_sources import (
     FINGERPRINT_SOURCES,
@@ -213,8 +215,15 @@ def _abspath_inside_root(path: str, root: str) -> bool:
     return common == os.path.normcase(root)
 
 
-def _walk(directory: str, recursive: bool, root_real: str) -> Iterator[str]:
+def _walk(
+    directory: str,
+    recursive: bool,
+    root_real: str,
+    cancel_event: threading.Event | None = None,
+) -> Iterator[str]:
     """Обход папки без symlink/junction и без выхода за корень."""
+    if cancel_event is not None and cancel_event.is_set():
+        return
     try:
         with os.scandir(directory) as entries:
             ordered = sorted(entries, key=lambda entry: entry.name.casefold())
@@ -222,6 +231,8 @@ def _walk(directory: str, recursive: bool, root_real: str) -> Iterator[str]:
         return
 
     for entry in ordered:
+        if cancel_event is not None and cancel_event.is_set():
+            return
         try:
             if entry.is_symlink():
                 continue
@@ -231,7 +242,7 @@ def _walk(directory: str, recursive: bool, root_real: str) -> Iterator[str]:
                 continue
             if entry.is_dir(follow_symlinks=False):
                 if recursive:
-                    yield from _walk(entry.path, True, root_real)
+                    yield from _walk(entry.path, True, root_real, cancel_event)
                 continue
             if not entry.is_file(follow_symlinks=False):
                 continue
@@ -245,16 +256,25 @@ def _walk(directory: str, recursive: bool, root_real: str) -> Iterator[str]:
         yield entry.path
 
 
-def iter_video_files(root: str, recursive: bool = False) -> Iterator[str]:
+def iter_video_files(
+    root: str,
+    recursive: bool = False,
+    cancel_event: threading.Event | None = None,
+) -> Iterator[str]:
     """Видеофайлы под `root` в детерминированном порядке.
 
     Пропускаются не-видео расширения, временные файлы `__ren_tmp_*`,
     symlink/junction и всё, что после нормализации оказалось вне `root`.
+
+    Отмена кооперативная: при выставленном `cancel_event` обход прекращается и
+    возвращаются уже найденные файлы, поэтому пустой список сам по себе не
+    отличает «файлов нет» от "отменили". `TitleService.preview` после обхода
+    проверяет событие и поднимает `OperationCancelled`.
     """
     root_path = os.path.abspath(os.fspath(root))
     if not os.path.isdir(root_path):
         return
-    yield from _walk(root_path, recursive, os.path.realpath(root_path))
+    yield from _walk(root_path, recursive, os.path.realpath(root_path), cancel_event)
 
 
 def _as_scenes(value: object) -> list[Scene]:
@@ -314,6 +334,7 @@ class TitleService:
         ffmpeg: str = "ffmpeg",
         ffprobe: str = "ffprobe",
         performers: PerformerIndex | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         self._root = os.path.abspath(os.fspath(root))
         self._studios = dict(studios)
@@ -332,6 +353,7 @@ class TitleService:
         self._ffprobe = ffprobe
         self._phash_func = phash_func or self._default_phash
         self._performers = performers
+        self._cancel_event = cancel_event
 
     def _default_phash(self, path: str) -> str:
         return format_phash(phash_from_path(path, ffmpeg=self._ffmpeg, ffprobe=self._ffprobe))
@@ -402,8 +424,15 @@ class TitleService:
         )
 
     def preview(self) -> PreviewReport:
-        """Строит предпросмотр, ничего не изменяя на диске."""
-        files = list(iter_video_files(self._root, self._recursive))
+        """Строит предпросмотр, ничего не изменяя на диске.
+
+        Если папку перестали обходить из-за `cancel_event`, поднимается
+        `OperationCancelled`: интерфейс не должен показать частичный результат
+        как полный.
+        """
+        files = list(iter_video_files(self._root, self._recursive, self._cancel_event))
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            raise OperationCancelled("preview cancelled while scanning the folder")
         if self._limit is not None:
             files = files[: max(0, self._limit)]
 

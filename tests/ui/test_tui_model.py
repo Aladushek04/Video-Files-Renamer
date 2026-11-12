@@ -27,6 +27,24 @@ def test_filter_and_toggle():
     assert model.approved_rows()[0].old_rel == "old.mp4"
 
 
+def test_matches_is_the_single_filter_rule():
+    model = ReviewModel("D:/Videos", [])
+    unchanged = row("unchanged", True)
+    approved = row("fingerprint", True)
+    pending = row("text", False)
+
+    assert model.matches(approved) is True
+
+    model.filter = "pending"
+    assert model.matches(unchanged) is False
+    assert model.matches(approved) is False
+    assert model.matches(pending) is True
+
+    model.filter = "fingerprint"
+    assert model.matches(approved) is True
+    assert model.matches(pending) is False
+
+
 def test_set_new_rel_can_approve_and_distinguish_unchanged():
     model = ReviewModel("D:/Videos", [row("heuristic", False)])
     updated = model.set_new_rel(0, "Custom.mp4", approved=True)
