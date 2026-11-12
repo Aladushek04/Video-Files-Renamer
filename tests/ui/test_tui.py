@@ -139,7 +139,7 @@ def test_undo_screen_lists_active_rows(tmp_path):
     log = _rename_log_with(tmp_path)
 
     async def run() -> None:
-        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        app = RenamerApp(folder=str(tmp_path), log_path=str(log))
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.click("#table")
             await pilot.press("u")
@@ -159,7 +159,7 @@ def test_legacy_undo_needs_checkbox(tmp_path):
     )
 
     async def run() -> None:
-        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(legacy))
+        app = RenamerApp(folder=str(tmp_path), log_path=str(legacy))
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.click("#table")
             await pilot.press("u")
@@ -181,7 +181,7 @@ def test_undo_confirmed_restores_file(tmp_path):
     log = _rename_log_with(tmp_path)
 
     async def run() -> None:
-        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        app = RenamerApp(folder=str(tmp_path), log_path=str(log))
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.click("#table")
             await pilot.press("u")
@@ -212,7 +212,7 @@ def test_undo_screen_survives_unreadable_log(tmp_path, monkeypatch):
     log.write_text("x", encoding="utf-8")
 
     async def run() -> None:
-        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        app = RenamerApp(folder=str(tmp_path), log_path=str(log))
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.click("#table")
             await pilot.press("u")
@@ -236,7 +236,7 @@ def test_undo_worker_error_is_shown_not_fatal(tmp_path, monkeypatch):
     log = _rename_log_with(tmp_path)
 
     async def run() -> None:
-        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        app = RenamerApp(folder=str(tmp_path), log_path=str(log))
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.click("#table")
             await pilot.press("u")
@@ -281,7 +281,7 @@ def test_undo_shows_unwritten_journal_rows(tmp_path, monkeypatch):
     log = _rename_log_with(tmp_path)
 
     async def run() -> None:
-        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(log))
+        app = RenamerApp(folder=str(tmp_path), log_path=str(log))
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.click("#table")
             await pilot.press("u")
@@ -316,7 +316,7 @@ def test_legacy_confirm_shows_root_folder(tmp_path):
     )
 
     async def run() -> None:
-        app = RenamerApp(folder=str(tmp_path), undo_log_path=str(legacy))
+        app = RenamerApp(folder=str(tmp_path), log_path=str(legacy))
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.click("#table")
             await pilot.press("u")
@@ -378,12 +378,12 @@ def test_confirm_apply_explains_rename_is_irreversible(tmp_path):
 
 
 def test_apply_log_failure_does_not_hide_results(tmp_path, monkeypatch):
-    import video_renamer.ui.tui as tui_module
+    from video_renamer.core import review_actions
 
     def broken_log(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr(tui_module, "append_rename_log", broken_log)
+    monkeypatch.setattr(review_actions, "append_rename_log", broken_log)
     video = tmp_path / "old1.mp4"
     video.write_bytes(b"abcdefghij")
     row = PreviewRow(

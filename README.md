@@ -27,7 +27,12 @@
    - **2** — предложить имена и применить то, что вы одобрите;
    - **3** — применить уже проверенный `preview.csv`.
 4. Для интерфейса с таблицей, фильтрами и кнопками запустите
-   **`scripts\start_tui.bat`** (сам создаст окружение и поставит Textual).
+   **`scripts\start_gui.bat`** (десктопный GUI на CustomTkinter) или
+   **`scripts\start_tui.bat`** (текстовый TUI на Textual). Батники сами
+   создадут окружение и поставят нужные зависимости.
+5. `launcher.py` перед запуском GUI безопасно проверяет обновления Git:
+   `git fetch`, затем `git pull --ff-only` только при чистом рабочем дереве.
+   Сбой сети или локальные правки не мешают запуску.
 
 Первый раз удобно попробовать на пяти файлах: в CLI это `--limit 5`.
 
@@ -40,6 +45,7 @@
 | Windows 10/11 | пути, длины имён и санитизация заточены под Windows | да |
 | Python 3.10+ (проверено на 3.14) | ядро и CLI работают на стандартной библиотеке | да |
 | Textual | интерфейс TUI (`requirements/tui.txt`) | нет, нужен только для TUI |
+| CustomTkinter | десктопный GUI (`requirements/gui.txt`) | нет, нужен только для GUI |
 | ffmpeg и ffprobe | поиск по PHASH (`--phash`) | нет, только для PHASH |
 | Ключ StashDB | поиск сцен; без него работает офлайн-режим | рекомендуется |
 | Ключи ThePornDB и FansDB | поиск в дополнительных базах | нет |
@@ -197,6 +203,36 @@ scripts\start_tui.bat D:\Videos\PH
 | `q` | выход (спросит подтверждение, если таблица не пуста) |
 
 Интерфейс рассчитан на окно 140×40; батник открывает консоль 150×45.
+
+### Десктопный интерфейс (GUI)
+
+```powershell
+scripts\start_gui.bat
+scripts\start_gui.bat D:\Videos\PH
+
+# без батника: обновление Git + GUI
+.venv\Scripts\python.exe launcher.py D:\Videos\PH
+
+# напрямую, без проверки обновлений
+.venv\Scripts\python.exe -m video_renamer.gui D:\Videos\PH
+```
+
+Слева — папка, Preview, статусы StashDB/FansDB/ThePornDB и статистика.
+В таблице у каждой строки есть чекбокс одобрения, выпадающий список
+кандидатов и редактируемое имя. «Применить» активно только при наличии
+одобренных строк. Долгие операции (скан, хеширование, сеть, apply, скраперы)
+идут в фоновых потоках; обновления возвращаются в Tk-поток через очередь.
+
+Таблица виртуализирована: в памяти живёт только видимый пул строк, поэтому
+сотни файлов не просаживают скролл. Горячие клавиши: `↑`/`↓` — выбор строки
+с автоскроллом, `Space` — одобрить или снять выбранную строку,
+`Ctrl+Enter` — применить, `F5` — Preview, `Esc` — снять выделение.
+Пока идёт первый тяжёлый скан, показывается skeleton-заглушка и прогресс-бар.
+Рядом с прогресс-баром во время Preview есть кнопка «Отмена»: она выставляет
+`threading.Event`, и воркер останавливается на ближайшем checkpoint прогресса.
+
+Отключить автообновление: `launcher.py --no-update` или
+`set VIDEO_RENAMER_SKIP_UPDATE=1`.
 
 ---
 
@@ -381,12 +417,14 @@ video_renamer/
 │  ├─ fingerprint_sources.py  # StashDB, ThePornDB, FansDB
 │  ├─ phash.py          #   перцептивный отпечаток (ffmpeg)
 │  ├─ rename_log.py     #   журнал переименований
+│  ├─ review_actions.py #   общий preview/apply для TUI и GUI
 │  └─ undo.py           #   откат выбранных строк
 ├─ scrapers/            # скраперы студий и слияние справочников
+├─ gui/                 # CustomTkinter-интерфейс
 └─ ui/                  # Textual-интерфейс и фоновые задачи
 data/studios.json       # объединённый справочник студий
-scripts/                # start.bat, start_tui.bat, start.ps1
-requirements/           # зависимости для TUI и разработки
+scripts/                # start.bat, start_gui.bat, start_tui.bat, start.ps1
+requirements/           # зависимости для TUI, GUI и разработки
 docs/                   # архитектура, планы, релизные заметки
 tests/                  # core/, scrapers/, ui/, cli/
 ```
@@ -394,18 +432,20 @@ tests/                  # core/, scrapers/, ui/, cli/
 ### Тесты
 
 ```powershell
-python -m pip install -e ".[dev,tui]"
+python -m pip install -e ".[dev,tui,gui]"
 python -m pytest -q
 ```
 
 Тесты не ходят в сеть: клиент подменяется через `transport`, кэш и папки —
-временные. Тесты TUI пропускаются, если Textual не установлен.
+временные. Тесты TUI пропускаются, если Textual не установлен; тесты
+GUI-виджетов — если недоступен Tk или нет дисплея.
 
 ### Установка как пакета
 
 ```powershell
-python -m pip install -e ".[tui]"
+python -m pip install -e ".[tui,gui]"
 video-renamer --help
+video-renamer-gui
 video-renamer-tui
 scrape-stashdb --help
 scrape-performers --help

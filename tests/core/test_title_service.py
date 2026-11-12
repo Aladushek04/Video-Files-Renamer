@@ -1,10 +1,12 @@
 import os
+import threading
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 
 from video_renamer.core import title_service
+from video_renamer.core.cancellation import OperationCancelled
 from video_renamer.core.phash import PhashError, PhashToolError
 from video_renamer.core.stashdb_client import (
     Performer,
@@ -388,6 +390,25 @@ def test_iter_video_files_recurses_and_skips_symlinks(tmp_path):
 
 def test_iter_video_files_missing_root_is_empty(tmp_path):
     assert list(iter_video_files(str(tmp_path / "missing"), True)) == []
+
+
+def test_iter_video_files_stops_when_cancelled(tmp_path):
+    write(tmp_path / "a.mp4")
+    cancel = threading.Event()
+    cancel.set()
+
+    assert list(iter_video_files(str(tmp_path), True, cancel)) == []
+
+
+def test_preview_raises_when_scan_is_cancelled(tmp_path):
+    """Отмена во время обхода — не то же самое, что пустая папка."""
+    write(tmp_path / "a.mp4")
+    cancel = threading.Event()
+    cancel.set()
+    service = TitleService(str(tmp_path), {}, None, None, cancel_event=cancel)
+
+    with pytest.raises(OperationCancelled):
+        service.preview()
 
 
 def test_iter_video_files_skips_symlinked_files(tmp_path):

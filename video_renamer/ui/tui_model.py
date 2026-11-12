@@ -34,11 +34,12 @@ class ReviewModel:
     def visible(self) -> list[tuple[int, PreviewRow]]:
         result: list[tuple[int, PreviewRow]] = []
         for index, row in enumerate(self.rows):
-            if self._matches(row):
+            if self.matches(row):
                 result.append((index, row))
         return result
 
-    def _matches(self, row: PreviewRow) -> bool:
+    def matches(self, row: PreviewRow) -> bool:
+        """Подходит ли строка под текущий фильтр; общее правило TUI и GUI."""
         if self.filter == "all":
             return True
         if self.filter == "pending":

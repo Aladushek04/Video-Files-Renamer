@@ -29,11 +29,13 @@ classifiers = [
 
 [project.optional-dependencies]
 tui = ["textual>=8.2,<9"]
+gui = ["customtkinter>=5.2,<6"]
 dev = ["pytest>=8", "ruff>=0.17"]
 
 [project.scripts]
 video-renamer = "video_renamer.cli:main"
 video-renamer-tui = "video_renamer.ui.tui:main"
+video-renamer-gui = "video_renamer.gui.app:main"
 scrape-stashdb = "video_renamer.scrapers.stashdb:main"
 scrape-performers = "video_renamer.scrapers.performers:main"
 scrape-fansdb = "video_renamer.scrapers.fansdb:main"
@@ -64,6 +66,16 @@ exclude = ["docs/**"]
 # Воркеры TUI ловят Exception намеренно: ошибка фонового потока должна попасть
 # в лог приложения, а не уронить интерфейс.
 "video_renamer/ui/tui.py" = ["BLE001"]
+# Сбой записи журнала не должен отменять уже выполненное переименование.
+"video_renamer/core/review_actions.py" = ["BLE001"]
+# GUI-воркеры и диспетчер работают по той же схеме: фоновая ошибка
+# показывается пользователю и не роняет Tk-цикл.
+"video_renamer/gui/app.py" = ["BLE001", "S110"]
+"video_renamer/gui/controller.py" = ["BLE001"]
+"video_renamer/gui/tasks.py" = ["BLE001", "S110"]
+"video_renamer/gui/virtual_rows.py" = ["BLE001", "S110"]
+# Лаунчер обязан запускать приложение даже при сбое git или диалога.
+"launcher.py" = ["BLE001", "S110"]
 # Здесь ValueError описывает битый JSON/checkpoint, а не неверный тип аргумента.
 "video_renamer/scrapers/merge_studios.py" = ["TRY004"]
 "video_renamer/scrapers/stashdb.py" = ["TRY004"]

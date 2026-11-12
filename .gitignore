@@ -48,6 +48,7 @@ data/performers*.json
 !.env.example
 
 # --- Служебное ---
+.vscode/
 .superpowers/
 Thumbs.db
 desktop.ini
