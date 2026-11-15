@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from video_renamer.core import review_actions
 from video_renamer.core.oshash import oshash_from_path
 from video_renamer.core.review_actions import (
@@ -86,7 +88,7 @@ def test_remove_renamed_keeps_pending_and_failed_rows():
 
 def test_loaders_tolerate_missing_files(tmp_path, monkeypatch):
     missing = tmp_path / "missing.json"
-    monkeypatch.setattr(review_actions, "STUDIOS_PATH", missing)
+    monkeypatch.setattr(review_actions, "resolve_studios_path", lambda: missing)
     monkeypatch.setattr(review_actions, "PERFORMERS_INDEX_PATH", missing)
 
     assert load_studios_catalog() == {}
@@ -96,8 +98,83 @@ def test_loaders_tolerate_missing_files(tmp_path, monkeypatch):
 def test_loaders_tolerate_broken_files(tmp_path, monkeypatch):
     broken = tmp_path / "broken.json"
     broken.write_text("{not json", encoding="utf-8")
-    monkeypatch.setattr(review_actions, "STUDIOS_PATH", broken)
+    monkeypatch.setattr(review_actions, "resolve_studios_path", lambda: broken)
     monkeypatch.setattr(review_actions, "PERFORMERS_INDEX_PATH", broken)
 
     assert load_studios_catalog() == {}
     assert load_performer_index() is None
+
+
+def test_studios_catalog_distinguishes_states(tmp_path, monkeypatch):
+    missing = tmp_path / "missing.json"
+    monkeypatch.setattr(review_actions, "resolve_studios_path", lambda: missing)
+    assert review_actions.studios_catalog() == ({}, "missing")
+
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(review_actions, "resolve_studios_path", lambda: broken)
+    studios, problem = review_actions.studios_catalog()
+    assert studios == {}
+    assert problem.startswith("unreadable: ")
+
+    # JSON-массив с тем же расширением — тоже повреждённый справочник.
+    array = tmp_path / "array.json"
+    array.write_text("[1, 2]", encoding="utf-8")
+    monkeypatch.setattr(review_actions, "resolve_studios_path", lambda: array)
+    assert review_actions.studios_catalog()[1].startswith("unreadable: ")
+
+    good = tmp_path / "studios.json"
+    good.write_text('{"A Studio": "A"}', encoding="utf-8")
+    monkeypatch.setattr(review_actions, "resolve_studios_path", lambda: good)
+    studios, problem = review_actions.studios_catalog()
+    assert problem == ""
+    assert list(studios) == ["astudio"]
+
+
+def test_studios_catalog_cache_follows_the_file(tmp_path, monkeypatch):
+    path = tmp_path / "studios.json"
+    path.write_text('{"A Studio": "A"}', encoding="utf-8")
+    monkeypatch.setattr(review_actions, "resolve_studios_path", lambda: path)
+    assert len(review_actions.studios_catalog()[0]) == 1
+
+    path.write_text('{"A Studio": "A", "B Studio": "B"}', encoding="utf-8")
+    # Сдвигаем mtime, чтобы кеш не зависел от гранулярности ФС.
+    os.utime(path, ns=(1_000_000_000, 2_000_000_000))
+
+    assert len(review_actions.studios_catalog()[0]) == 2
+
+
+def test_apply_rows_moves_nothing_when_journal_is_unavailable(tmp_path):
+    preview_row = make_video(tmp_path)
+    blocker = tmp_path / "blocker"
+    blocker.write_bytes(b"not a folder")
+
+    report, log_error = apply_rows(
+        str(tmp_path),
+        [preview_row],
+        log_path=str(blocker / "rename_log.csv"),
+    )
+
+    assert log_error == ""
+    assert report.had_errors is True
+    assert report.results[0].status == "error"
+    assert "journal is not writable" in report.results[0].message
+    assert (tmp_path / "old.mp4").exists()
+    assert not (tmp_path / "new.mp4").exists()
+
+
+def test_journal_failure_keeps_unapproved_rows_skipped(tmp_path):
+    approved = make_video(tmp_path)
+    pending = row("pending.mp4", "Pending.mp4", approved=False)
+    blocker = tmp_path / "blocker"
+    blocker.write_bytes(b"not a folder")
+
+    report, log_error = apply_rows(
+        str(tmp_path),
+        [approved, pending],
+        log_path=str(blocker / "rename_log.csv"),
+    )
+
+    assert log_error == ""
+    assert [result.status for result in report.results] == ["error", "skipped"]
+    assert (tmp_path / "old.mp4").exists()

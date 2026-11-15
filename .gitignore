@@ -10,6 +10,18 @@ build/
 dist/
 *.egg-info/
 
+# --- Артефакты тестов и покрытия ---
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+pip-wheel-metadata/
+*.whl
+*.tar.gz
+
+# --- IDE ---
+.idea/
+
 # --- Локальный кэш StashDB ---
 cache/
 *.sqlite3
@@ -25,6 +37,9 @@ rename_log*.csv
 *.tmp
 
 # --- Скрапер студий ---
+# Поставляемый справочник лежит в пакете; этот путь — обновлённая копия
+# пользователя, она игнорируется в checkout.
+data/studios.json
 studios_raw.json
 studios_raw*.json
 studios_*_raw.json

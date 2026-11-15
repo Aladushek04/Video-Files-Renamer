@@ -79,11 +79,11 @@ class FakeCache:
             return
         self.source_store[(source, algorithm, digest)] = list(scenes)
 
-    def get_local_phash(self, oshash, size):
-        return self.local_phash_store.get((oshash, size))
+    def get_local_phash(self, oshash, size, mtime_ns=0, file_id=0):
+        return self.local_phash_store.get((oshash, size, mtime_ns))
 
-    def put_local_phash(self, oshash, size, phash):
-        self.local_phash_store[(oshash, size)] = phash
+    def put_local_phash(self, oshash, size, phash, mtime_ns=0, file_id=0):
+        self.local_phash_store[(oshash, size, mtime_ns)] = phash
 
     def get_text_query(self, term):
         self.text_gets.append(term)
@@ -1232,3 +1232,103 @@ def test_apply_chain_failure_restores_original_paths(tmp_path, monkeypatch):
     assert (tmp_path / "b.mp4").read_bytes() == b"def"
     assert not (tmp_path / "c.mp4").exists()
     assert not list(tmp_path.glob("__ren_tmp_*"))
+
+
+def test_apply_reports_temp_path_when_rollback_also_fails(tmp_path, monkeypatch):
+    (tmp_path / "a.mp4").write_bytes(b"abc")
+    real_rename = os.rename
+
+    def fail_final_and_rollback(src, dst):
+        source_name = os.path.basename(src)
+        target_name = os.path.basename(dst)
+        if source_name.startswith("__ren_tmp_") and target_name == "b.mp4":
+            raise OSError("injected final failure")
+        if source_name.startswith("__ren_tmp_") and target_name == "a.mp4":
+            raise OSError("injected rollback failure")
+        real_rename(src, dst)
+
+    monkeypatch.setattr(title_service.os, "rename", fail_final_and_rollback)
+    report = apply_service(tmp_path).apply_rows([row("a.mp4", "b.mp4")], dry_run=False)
+
+    result = report.results[0]
+    kept = list(tmp_path.glob("__ren_tmp_*"))
+    assert result.status == "error"
+    assert len(kept) == 1
+    assert str(kept[0]) in result.message
+    assert "original: a.mp4" in result.message
+    assert not (tmp_path / "a.mp4").exists()
+    assert not (tmp_path / "b.mp4").exists()
+
+
+OSHASH_CHUNK = 64 * 1024
+
+
+def _real_row(tmp_path, old="a.mp4", new="b.mp4"):
+    """Строка с настоящим OSHASH и размером файла."""
+    from video_renamer.core.oshash import oshash_from_path
+
+    video = tmp_path / old
+    return PreviewRow(
+        True,
+        old,
+        new,
+        "text",
+        0.9,
+        "s1",
+        "",
+        oshash_from_path(str(video)),
+        video.stat().st_size,
+    )
+
+
+def test_apply_accepts_middle_change_with_same_size(tmp_path):
+    """Гарантия проверки: размер + края файла, середина не покрыта."""
+    payload = bytearray(b"\x01" * (OSHASH_CHUNK * 3))
+    (tmp_path / "a.mp4").write_bytes(bytes(payload))
+    preview_row = _real_row(tmp_path)
+
+    payload[OSHASH_CHUNK + 5] = 0x7F
+    (tmp_path / "a.mp4").write_bytes(bytes(payload))
+
+    report = TitleService(str(tmp_path), {}, None, None).apply_rows([preview_row], dry_run=True)
+
+    assert report.results[0].status == "renamed"
+    assert report.results[0].message == "dry-run"
+
+
+@pytest.mark.parametrize("position", ["head", "tail"])
+def test_apply_rejects_changed_edges(tmp_path, position):
+    payload = bytearray(b"\x01" * (OSHASH_CHUNK * 3))
+    (tmp_path / "a.mp4").write_bytes(bytes(payload))
+    preview_row = _real_row(tmp_path)
+
+    payload[10 if position == "head" else -10] ^= 0xFF
+    (tmp_path / "a.mp4").write_bytes(bytes(payload))
+
+    report = TitleService(str(tmp_path), {}, None, None).apply_rows([preview_row], dry_run=True)
+
+    assert report.results[0].status == "error"
+    assert "stale oshash" in report.results[0].message
+
+
+def test_apply_rejects_changed_size(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"0123456789abcdef")
+    preview_row = _real_row(tmp_path)
+    (tmp_path / "a.mp4").write_bytes(b"0123456789abcdefgh")
+
+    report = TitleService(str(tmp_path), {}, None, None).apply_rows([preview_row], dry_run=True)
+
+    assert report.results[0].status == "error"
+    assert "stale size" in report.results[0].message
+
+
+def test_apply_force_skips_size_and_oshash_checks(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"0123456789abcdef")
+    preview_row = _real_row(tmp_path)
+    (tmp_path / "a.mp4").write_bytes(b"changed contents!!")
+
+    report = TitleService(str(tmp_path), {}, None, None).apply_rows(
+        [preview_row], dry_run=True, force=True
+    )
+
+    assert report.results[0].status == "renamed"

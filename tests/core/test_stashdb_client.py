@@ -562,3 +562,43 @@ def test_query_studios_sends_page_and_per_page():
     body = calls[0]
     assert body["variables"] == {"page": 3, "perPage": 50}
     assert "queryStudios" in body["query"]
+
+
+def test_timeout_is_retried_then_transient():
+    timeouts: list[float] = []
+
+    def transport(request, timeout):
+        timeouts.append(timeout)
+        raise TimeoutError("timed out")
+
+    client = StashDBClient(
+        "test-token",
+        delay=0.0,
+        timeout=7.5,
+        max_attempts=2,
+        sleep=lambda seconds: None,
+        transport=transport,
+    )
+
+    with pytest.raises(StashDBTransientError):
+        client.execute("{ ok }")
+
+    assert timeouts == [7.5, 7.5]
+
+
+def test_scene_id_is_normalized_to_a_token():
+    assert scene_from_node({"id": "=1+1"}).id == ""
+    assert scene_from_node({"id": "  abc-123  "}).id == "abc-123"
+    assert scene_from_node({"id": "id with space"}).id == ""
+    assert scene_from_node({"id": "x" * 129}).id == ""
+    assert scene_from_node({"id": "0f3c8f0e-1b2a-4c5d-8e9f-0123456789ab"}).id == (
+        "0f3c8f0e-1b2a-4c5d-8e9f-0123456789ab"
+    )
+    assert scene_from_node({}).id == ""
+
+
+def test_cached_scene_id_is_normalized():
+    from video_renamer.core.stashdb_client import Scene
+
+    assert Scene.from_dict({"id": "@evil"}).id == ""
+    assert Scene.from_dict({"id": "s-1"}).id == "s-1"

@@ -34,6 +34,9 @@ STASHDB_ENDPOINT = "https://stashdb.org/graphql"
 FINGERPRINT_BATCH_SIZE = 40
 RETRY_AFTER_CAP = 300
 BACKOFF_SECONDS = (1, 3, 9)
+# ID сцены — токен, а не произвольный текст: он попадает в CSV и журнал.
+_ID_MAX_LENGTH = 128
+_ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-")
 
 __all__ = [
     "FINGERPRINT_BATCH_SIZE",
@@ -51,6 +54,7 @@ __all__ = [
     "StashDBResponseError",
     "StashDBTransientError",
     "Studio",
+    "normalize_scene_id",
     "scene_from_node",
     "studio_from_node",
 ]
@@ -182,6 +186,8 @@ class Scene:
 
     `release_date` — актуальная дата выхода, `date` — устаревшее поле.
     `studio` может быть `None`, `performers` — кортеж (пустой тоже допустим).
+    `id` нормализуется при создании: в CSV и журнал попадает только токен
+    из безопасного набора (см. `normalize_scene_id`).
     """
 
     id: str
@@ -193,6 +199,11 @@ class Scene:
     studio: Studio | None = None
     performers: tuple[Performer, ...] = ()
     source: str = "StashDB"
+
+    def __post_init__(self) -> None:
+        normalized = normalize_scene_id(self.id)
+        if normalized != self.id:
+            object.__setattr__(self, "id", normalized)
 
     def to_dict(self) -> dict:
         """Плоское представление для JSON-кэша (SQLite)."""
@@ -265,6 +276,26 @@ def _performer_from_entry(entry: object) -> Performer | None:
     )
 
 
+def normalize_scene_id(value: object) -> str:
+    """ID сцены как безопасный токен; не-токен становится пустой строкой.
+
+    ID приходит из сети, кэша или CSV и попадает в экспорт. Его настоящий
+    контракт — короткий идентификатор без пробелов, управляющих символов и
+    формульных префиксов, поэтому всё остальное не считается ID: строка
+    остаётся работоспособной, но без ссылки на сцену.
+    """
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if not text or len(text) > _ID_MAX_LENGTH:
+        return ""
+    if text[0] in "=+-@":
+        return ""
+    if any(char not in _ID_CHARS for char in text):
+        return ""
+    return text
+
+
 def scene_from_node(node: dict) -> Scene:
     """Сцена из узла GraphQL.
 
@@ -309,6 +340,21 @@ def _studios_from_nodes(nodes: object) -> list[Studio]:
     return [studio_from_node(node) for node in nodes if isinstance(node, dict)]
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Запрещает автоматические redirect для запросов с ключом.
+
+    Стандартный обработчик переносит заголовок `ApiKey` на новый адрес,
+    включая другой хост и `http://`. Возврат `None` означает «не обработано» —
+    urllib отдаёт `HTTPError` с кодом 3xx, и клиент не идёт по `Location`.
+
+    Аргументы заданы сигнатурой `HTTPRedirectHandler.redirect_request` и здесь
+    намеренно не используются.
+    """
+
+    def redirect_request(self, _req, _fp, _code, _msg, _headers, _newurl):
+        return None
+
+
 class StashDBClient:
     """Минимальный GraphQL-клиент StashDB.
 
@@ -318,7 +364,8 @@ class StashDBClient:
 
     Повторы: 429 — по `Retry-After` (целые секунды, не больше 300); 5xx,
     `URLError` и таймауты — с паузой 1/3/9 секунд. 401/403 и GraphQL
-    `not authorized` фатальны и не повторяются.
+    `not authorized` фатальны и не повторяются. Redirect не выполняется:
+    иначе ключ ушёл бы на адрес из `Location`.
     """
 
     def __init__(
@@ -341,6 +388,7 @@ class StashDBClient:
         self._max_attempts = max_attempts
         self._sleep = sleep
         self._transport = transport
+        self._opener: urllib.request.OpenerDirector | None = None
 
     def find_scenes_by_hashes(
         self, hashes: Sequence[str], algorithm: str = "OSHASH"
@@ -431,6 +479,11 @@ class StashDBClient:
                         raise last_error from exc
                     self._sleep(self._backoff_seconds(attempt))
                     continue
+                if 300 <= status < 400:
+                    raise StashDBResponseError(
+                        f"StashDB returned HTTP {status}; redirects are not followed "
+                        "so the API key is never resent"
+                    ) from exc
                 raise StashDBResponseError(f"StashDB returned unexpected HTTP {status}") from exc
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 last_error = StashDBTransientError(f"StashDB request failed: {exc}")
@@ -447,10 +500,16 @@ class StashDBClient:
         raise StashDBTransientError("StashDB request failed")
 
     def _send(self, request: urllib.request.Request) -> bytes:
-        """Один сетевой вызов — через `transport`, если он задан."""
+        """Один сетевой вызов — через `transport`, если он задан.
+
+        Открывалка создаётся без стандартного redirect-обработчика: запрос
+        с `ApiKey` не должен уходить на `Location`.
+        """
         if self._transport is not None:
             return self._transport(request, self._timeout)
-        with urllib.request.urlopen(request, timeout=self._timeout) as response:
+        if self._opener is None:
+            self._opener = urllib.request.build_opener(_NoRedirectHandler)
+        with self._opener.open(request, timeout=self._timeout) as response:
             return response.read()
 
     def _parse_response(self, raw: bytes | str) -> dict:

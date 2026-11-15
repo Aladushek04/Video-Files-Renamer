@@ -1,3 +1,4 @@
+import csv
 from datetime import datetime, timezone
 
 import pytest
@@ -10,6 +11,7 @@ from video_renamer.core.rename_log import (
     append_log,
     entry_id,
     format_log_timestamp,
+    log_write_problem,
     read_log,
 )
 
@@ -139,3 +141,114 @@ def test_append_writes_bom_only_to_new_file(tmp_path):
     raw = path.read_bytes()
     assert raw.startswith(b"\xef\xbb\xbf")
     assert raw.count(b"\xef\xbb\xbf") == 1
+
+
+def test_log_write_problem_accepts_usable_path(tmp_path):
+    path = tmp_path / "rename_log.csv"
+
+    assert log_write_problem(str(path)) == ""
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_log_write_problem_keeps_existing_log_intact(tmp_path):
+    path = tmp_path / "rename_log.csv"
+    path.write_text("header\n", encoding="utf-8")
+
+    assert log_write_problem(str(path)) == ""
+    assert path.read_text(encoding="utf-8") == "header\n"
+
+
+def test_log_write_problem_reports_unpreparable_path(tmp_path):
+    blocker = tmp_path / "blocker"
+    blocker.write_bytes(b"not a folder")
+
+    assert log_write_problem(str(blocker / "rename_log.csv")) != ""
+
+
+DANGEROUS_VALUES = [
+    "=2+2",
+    "+1",
+    "-1",
+    "@cmd",
+    " =2+2",
+    "\t=2+2",
+    "\r=2+2",
+    "\n@cmd",
+    "'=2+2",
+    "''=2+2",
+    "=SUM(A1)",
+]
+
+
+@pytest.mark.parametrize("value", DANGEROUS_VALUES)
+def test_guard_roundtrips_and_leaves_nothing_dangerous(value):
+    guarded = rename_log._guard_formula(value)
+
+    assert rename_log._unguard_formula(guarded) == value
+    assert rename_log._needs_formula_guard(guarded) is False
+
+
+@pytest.mark.parametrize("value", ["plain.mp4", " spaced.mp4", "a=b.mp4", "'quote", ""])
+def test_guard_leaves_safe_values_untouched(value):
+    assert rename_log._guard_formula(value) == value
+
+
+def test_append_log_guards_every_untrusted_field(tmp_path):
+    entry = LogEntry(
+        timestamp="2026-11-15T10:00:00.000000Z",
+        action="rename",
+        undoes="",
+        root="=root",
+        old="+old.mp4",
+        new="@new.mp4",
+        oshash="-h",
+        size=1,
+        scene_id="=3+3",
+        source="=2+2",
+        legacy=False,
+    )
+    path = tmp_path / "rename_log.csv"
+
+    append_log(str(path), [entry])
+
+    with open(path, encoding="utf-8-sig", newline="") as handle:
+        records = list(csv.reader(handle, delimiter=";"))
+    cells = dict(zip(records[0], records[1], strict=True))
+    for field in ("root", "old", "new", "oshash", "scene_id", "source"):
+        assert cells[field].startswith("'"), field
+    read_back = read_log(str(path))
+    assert read_back == [entry]
+    assert read_back[0].id == entry.id
+
+
+def test_old_journal_with_raw_formula_values_reads_as_written(tmp_path):
+    """Журнал 0.2.0: source/scene_id писались без защиты."""
+    path = tmp_path / "rename_log.csv"
+    path.write_text(
+        "timestamp;action;undoes;root;old;new;oshash;size;scene_id;source\n"
+        "2026-11-01T10:00:00.000000Z;rename;;R;=a.mp4;'=b.mp4;h;3;=3+3;=2+2\n",
+        encoding="utf-8-sig",
+    )
+
+    entry = read_log(str(path))[0]
+
+    assert entry.old == "=a.mp4"
+    assert entry.new == "=b.mp4"
+    assert entry.scene_id == "=3+3"
+    assert entry.source == "=2+2"
+
+
+def test_legacy_journal_with_formula_values_reads_as_written(tmp_path):
+    path = tmp_path / "rename_log.csv"
+    path.write_text(
+        f"{LEGACY_HEADER}\n2026-10-01T10:00:00.000000Z;'=a.mp4;@b.mp4;h;=3+3;=2+2\n",
+        encoding="utf-8-sig",
+    )
+
+    entry = read_log(str(path))[0]
+
+    assert entry.legacy is True
+    assert entry.old == "=a.mp4"
+    assert entry.new == "@b.mp4"
+    assert entry.scene_id == "=3+3"
+    assert entry.source == "=2+2"

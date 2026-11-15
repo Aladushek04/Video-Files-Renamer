@@ -75,11 +75,12 @@ def missing_secondary_keys(env: Mapping[str, str]) -> list[FingerprintSource]:
     ]
 
 
-def build_fingerprint_clients(env: Mapping[str, str], *, offline: bool) -> dict[str, StashDBClient]:
+def build_fingerprint_clients(env: Mapping[str, str]) -> dict[str, StashDBClient]:
     """Клиенты вторичных источников; без ключа источник пропускается.
 
-    Клиент StashDB сюда не входит: он создаётся вызывающим кодом. Клиенты создаются
-    и в офлайн-режиме, чтобы читался кэш; сеть запрещает сервис по флагу offline.
+    Клиент StashDB сюда не входит: он создаётся вызывающим кодом. Клиенты
+    создаются и в offline-режиме, чтобы читался кэш; сеть запрещает сервис по
+    своему флагу, а не отсутствие клиента.
     """
     clients: dict[str, StashDBClient] = {}
     for source in FINGERPRINT_SOURCES[1:]:

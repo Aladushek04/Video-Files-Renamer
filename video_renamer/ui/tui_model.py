@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
 from video_renamer.core.title_service import PreviewRow
+from video_renamer.paths import same_folder
 
 FILTERS: tuple[tuple[str, str], ...] = (
     ("all", "Все"),
@@ -20,13 +21,26 @@ FILTERS: tuple[tuple[str, str], ...] = (
 
 @dataclass
 class ReviewModel:
-    """Состояние экрана ревью: строки, фильтр и ручные approvals."""
+    """Состояние экрана ревью: строки, фильтр и ручные approvals.
+
+    `folder` — корень, для которого получены строки. Он не меняется при
+    переключении папки: перенос старых одобрений на другой корень запрещён.
+    """
 
     folder: str
     rows: list[PreviewRow]
 
     def __post_init__(self) -> None:
         self._filter = "all"
+
+    def is_for(self, folder: str) -> bool:
+        """Относятся ли строки к этой папке."""
+        return same_folder(self.folder, folder)
+
+    def reset_review(self) -> None:
+        """Снимает привязку к корню вместе со строками и одобрениями."""
+        self.folder = ""
+        self.rows = []
 
     def set_rows(self, rows: Iterable[PreviewRow]) -> None:
         self.rows = list(rows)

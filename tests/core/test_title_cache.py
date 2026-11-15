@@ -2,6 +2,8 @@ import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from video_renamer.core.stashdb_client import Performer, Scene, Studio
 from video_renamer.core.title_cache import TitleCache
 
@@ -107,12 +109,73 @@ def test_legacy_fingerprints_migrated_once(tmp_path):
     again.close()
 
 
-def test_local_phash_is_keyed_by_content_not_path(tmp_path):
+def test_local_phash_is_keyed_by_content_and_version(tmp_path):
     cache = TitleCache(tmp_path / "c.sqlite3")
-    cache.put_local_phash("oh", 100, "dc75c0f03795438e")
-    assert cache.get_local_phash("oh", 100) == "dc75c0f03795438e"
-    assert cache.get_local_phash("oh", 101) is None
+    cache.put_local_phash("oh", 100, "dc75c0f03795438e", 111)
+    assert cache.get_local_phash("oh", 100, 111) == "dc75c0f03795438e"
+    assert cache.get_local_phash("oh", 101, 111) is None
+    # Другой mtime — запись сделана для прежней версии файла.
+    assert cache.get_local_phash("oh", 100, 222) is None
     cache.close()
+
+
+def test_local_phash_file_id_must_match_when_known(tmp_path):
+    cache = TitleCache(tmp_path / "c.sqlite3")
+    cache.put_local_phash("oh", 100, "p1", 111, file_id=7)
+    assert cache.get_local_phash("oh", 100, 111, 7) == "p1"
+    # Файл подменён: та же пара (OSHASH, размер), но другой inode.
+    assert cache.get_local_phash("oh", 100, 111, 8) is None
+    # ОС не сообщает file id — сверять нечего.
+    assert cache.get_local_phash("oh", 100, 111, 0) == "p1"
+    cache.close()
+
+
+def test_legacy_local_phash_rows_are_not_trusted(tmp_path):
+    """База старой схемы: PHASH без версии файла пересчитывается, а не
+    выдаётся за свежий."""
+    path = tmp_path / "old.sqlite3"
+    raw = sqlite3.connect(path)
+    raw.execute(
+        "CREATE TABLE local_phash (oshash TEXT NOT NULL, size INTEGER NOT NULL, "
+        "phash TEXT NOT NULL, computed_at TEXT NOT NULL, PRIMARY KEY (oshash, size))"
+    )
+    raw.execute("INSERT INTO local_phash VALUES ('oh', 100, 'stale', '2026-01-01T00:00:00+00:00')")
+    raw.commit()
+    raw.close()
+
+    cache = TitleCache(path)
+    assert cache.get_local_phash("oh", 100, 111) is None
+    cache.put_local_phash("oh", 100, "fresh", 111)
+    assert cache.get_local_phash("oh", 100, 111) == "fresh"
+    cache.close()
+
+    # Миграция идемпотентна: повторное открытие той же базы.
+    again = TitleCache(path)
+    assert again.get_local_phash("oh", 100, 111) == "fresh"
+    again.close()
+
+
+def test_broken_local_phash_schema_fails_without_losing_data(tmp_path):
+    """Сбой миграции — понятная ошибка, а не молчаливо свежий PHASH.
+
+    Таблица `local_phash` — представление: добавить в него столбцы нельзя.
+    Открытие должно упасть с `sqlite3.Error` (CLI сообщает `cannot open cache`
+    и возвращает 2), не трогая остальные данные базы.
+    """
+    path = tmp_path / "c.sqlite3"
+    raw = sqlite3.connect(path)
+    raw.execute("CREATE TABLE other (x INTEGER)")
+    raw.execute("INSERT INTO other VALUES (42)")
+    raw.execute("CREATE VIEW local_phash AS SELECT x AS oshash FROM other")
+    raw.commit()
+    raw.close()
+
+    with pytest.raises(sqlite3.Error):
+        TitleCache(path)
+
+    raw = sqlite3.connect(path)
+    assert raw.execute("SELECT x FROM other").fetchall() == [(42,)]
+    raw.close()
 
 
 def test_scene_fields_survive_the_roundtrip(tmp_path):

@@ -181,7 +181,11 @@ def _scene_blocks(scene: Scene, local: LocalNameInfo) -> tuple[str, str, tuple[s
 
 
 def build_scene_stem(scene: Scene, local: LocalNameInfo, studios: dict[str, str]) -> str:
-    """Итоговый stem из официальных полей сцены с локальными fallback-ами."""
+    """Итоговый stem из официальных полей сцены с локальными fallback-ами.
+
+    `studios` принимается для единообразия с `build_heuristic_stem` и
+    `resolve_match`: на этом пути справочник не нужен.
+    """
     studio, date, actors, title = _scene_blocks(scene, local)
     return sanitize_windows_stem(build_new_name(studio, date, actors, title))
 

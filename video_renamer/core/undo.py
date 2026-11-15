@@ -112,6 +112,116 @@ def select_for_undo(
     return UndoSelection(tuple(targets), tuple(errors))
 
 
+def _undo_row(target: UndoTarget) -> PreviewRow:
+    """Строка apply для возврата файла на прежнее имя."""
+    entry = target.entry
+    return PreviewRow(
+        True,
+        entry.new,
+        entry.old,
+        entry.source,
+        0.0,
+        entry.scene_id,
+        "undo",
+        entry.oshash,
+        entry.size,
+        (),
+    )
+
+
+def _path_key(path: str) -> str:
+    """Ключ пути для виртуальной модели dry-run."""
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _all_sources_present(root: str, items: Sequence[tuple[int, UndoTarget]]) -> bool:
+    """Существуют ли все текущие имена, которые нужно вернуть назад.
+
+    Если да — строки можно откатывать одной партией: так работает обмен
+    `A ↔ B` и цепочка `a → b, b → c`, применённая одним apply. Если хотя бы
+    одного имени нет — это последовательные операции одного файла, и откат
+    идёт пошагово от новой к старой. Проверка всегда идёт по настоящему диску:
+    имена, которые вернут предыдущие шаги, партией не откатываются.
+    """
+    return all(os.path.lexists(os.path.join(root, target.entry.new)) for _, target in items)
+
+
+def _batch_apply(
+    root: str, items: Sequence[tuple[int, UndoTarget]], dry_run: bool
+) -> list[tuple[str, str]]:
+    """Откат партией: одновременное переименование через временные имена."""
+    rows = [_undo_row(target) for _, target in items]
+    report = TitleService(root, {}, None).apply_rows(rows, dry_run=dry_run)
+    return [(result.status, result.message) for result in report.results]
+
+
+def _remember_batch(
+    virtual: dict[str, bool], root: str, items: Sequence[tuple[int, UndoTarget]]
+) -> None:
+    """Учитывает в dry-run, какие имена партия вернёт и какие заберёт."""
+    restored = {_path_key(os.path.join(root, target.entry.old)) for _, target in items}
+    sources = {_path_key(os.path.join(root, target.entry.new)) for _, target in items}
+    for key in sources - restored:
+        virtual[key] = False
+    for key in restored:
+        virtual[key] = True
+
+
+def _sequential_apply(root: str, items: Sequence[tuple[int, UndoTarget]]) -> list[tuple[str, str]]:
+    """Пошаговый откат от новой записи к старой: каждый шаг видит диск после прошлого."""
+    service = TitleService(root, {}, None)
+    outcomes: list[tuple[str, str]] = []
+    for _, target in items:
+        report = service.apply_rows([_undo_row(target)], dry_run=False)
+        result = report.results[0]
+        outcomes.append((result.status, result.message))
+    return outcomes
+
+
+def _sequential_dry_run(
+    root: str, items: Sequence[tuple[int, UndoTarget]], virtual: dict[str, bool]
+) -> list[tuple[str, str]]:
+    """Предсказывает пошаговый откат, не меняя диск.
+
+    Пока путь реальный, шаг проверяется настоящим apply в режиме dry-run
+    (размер, OSHASH, правила имени, занятость цели). Для пути, который появится
+    только после предыдущего шага, проверка невозможна: он помечается
+    `dry-run` с явной оговоркой, а не выдаётся за проверенный. `virtual`
+    живёт всё время отката, потому что шаги последовательных операций
+    распределены по разным группам журнала.
+    """
+    service = TitleService(root, {}, None)
+    outcomes: list[tuple[str, str]] = []
+    for _, target in items:
+        row = _undo_row(target)
+        old_path = os.path.join(root, row.old_rel)
+        new_path = os.path.join(root, row.new_rel)
+        old_key = _path_key(old_path)
+        new_key = _path_key(new_path)
+        old_virtual = old_key in virtual
+        old_exists = virtual.get(old_key, os.path.lexists(old_path))
+        new_exists = virtual.get(new_key, os.path.lexists(new_path))
+        if not old_exists:
+            outcomes.append(("error", "cannot stat old path: файл отсутствует"))
+            continue
+        if new_exists and new_key != old_key:
+            outcomes.append(("error", "target is occupied"))
+            continue
+        if old_virtual:
+            outcomes.append(("dry-run", "после отката предыдущей операции"))
+            virtual[old_key] = False
+            virtual[new_key] = True
+            continue
+        result = service.apply_rows([row], dry_run=True).results[0]
+        if result.status == "renamed":
+            outcomes.append(("dry-run", result.message))
+            virtual[old_key] = False
+            virtual[new_key] = True
+        else:
+            outcomes.append((result.status, result.message))
+    return outcomes
+
+
 def _undo_entry(target: UndoTarget, timestamp: str) -> LogEntry:
     entry = target.entry
     return LogEntry(
@@ -136,34 +246,31 @@ def run_undo(
     dry_run: bool,
     now: datetime | None = None,
 ) -> UndoReport:
-    """Откатывает выбранные строки; при `dry_run` ничего не меняет и не пишет журнал."""
+    """Откатывает выбранные строки; при `dry_run` ничего не меняет и не пишет журнал.
+
+    Записи одного apply (одинаковый timestamp) откатываются одной партией.
+    Последовательные операции над одним файлом (`a → b`, затем `b → c`) идут
+    пошагово от новой к старой: имени `b` ещё нет, его вернёт предыдущий шаг.
+    """
     timestamp = format_log_timestamp(now)
-    groups: dict[str, list[tuple[int, UndoTarget]]] = {}
+    groups: dict[tuple[str, str], list[tuple[int, UndoTarget]]] = {}
     for index, target in enumerate(selection.targets):
-        groups.setdefault(target.root, []).append((index, target))
+        groups.setdefault((target.root, target.entry.timestamp), []).append((index, target))
 
     results: dict[int, UndoResult] = {}
     undo_entries: list[LogEntry] = []
     renamed_indexes: list[int] = []
-    for root, items in groups.items():
-        rows = [
-            PreviewRow(
-                True,
-                target.entry.new,
-                target.entry.old,
-                target.entry.source,
-                0.0,
-                target.entry.scene_id,
-                "undo",
-                target.entry.oshash,
-                target.entry.size,
-                (),
-            )
-            for _, target in items
-        ]
-        report = TitleService(root, {}, None).apply_rows(rows, dry_run=dry_run)
-        for (index, target), outcome in zip(items, report.results):
-            status = outcome.status
+    virtual: dict[str, bool] = {}
+    for (root, _stamp), items in groups.items():
+        if _all_sources_present(root, items):
+            outcomes = _batch_apply(root, items, dry_run)
+            if dry_run:
+                _remember_batch(virtual, root, items)
+        elif dry_run:
+            outcomes = _sequential_dry_run(root, items, virtual)
+        else:
+            outcomes = _sequential_apply(root, items)
+        for (index, target), (status, message) in zip(items, outcomes):
             if status == "renamed" and dry_run:
                 status = "dry-run"
             results[index] = UndoResult(
@@ -171,7 +278,7 @@ def run_undo(
                 target.entry.new,
                 target.entry.old,
                 status,
-                outcome.message,
+                message,
             )
             if status == "renamed":
                 undo_entries.append(_undo_entry(target, timestamp))

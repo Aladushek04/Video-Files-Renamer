@@ -17,12 +17,20 @@ $python = Get-Python
 
 function Invoke-Cli {
     param([string[]]$CliArgs)
+    # Вывод CLI идёт сразу в консоль: в success stream должен попасть только код.
+    # Иначе `$code = Invoke-Cli ...` получает массив строк вместе с кодом,
+    # и `$code -ne 0` выглядит правдой при успешном вызове.
     if ($python -eq "py") {
-        & py -3 -m video_renamer.cli @CliArgs
+        & py -3 -m video_renamer.cli @CliArgs | Out-Host
     } else {
-        & python -m video_renamer.cli @CliArgs
+        & python -m video_renamer.cli @CliArgs | Out-Host
     }
     return $LASTEXITCODE
+}
+
+function Wait-Enter {
+    param([string]$Prompt = "Нажмите Enter")
+    Read-Host $Prompt | Out-Null
 }
 
 function Open-Path {
@@ -53,7 +61,7 @@ function Invoke-Preview {
     $code = Invoke-Cli @("preview", $Folder, "--csv", "preview.csv")
     if ($code -ne 0) {
         Write-Host "Ошибка preview (код $code)."
-        Read-Host "Нажмите Enter, чтобы вернуться в меню"
+        Wait-Enter "Нажмите Enter, чтобы вернуться в меню"
         return $false
     }
     Write-Host "Готово: preview.csv"
@@ -65,7 +73,7 @@ function Invoke-Apply {
     param([string]$Folder)
     if (-not (Test-Path -LiteralPath (Join-Path $projectRoot "preview.csv"))) {
         Write-Host "preview.csv не найден. Сначала сделайте preview."
-        Read-Host "Нажмите Enter"
+        Wait-Enter "Нажмите Enter"
         return
     }
     Write-Host "Применяю только строки с approved=y..."
@@ -76,63 +84,72 @@ function Invoke-Apply {
     } else {
         Write-Host "Ошибка apply (код $code)."
     }
-    Read-Host "Нажмите Enter, чтобы вернуться в меню"
+    Wait-Enter "Нажмите Enter, чтобы вернуться в меню"
 }
 
-$folder = $null
-if ($args.Count -gt 0) {
-    $folder = $args[0]
-} else {
-    $folder = Select-Folder
-}
-if (-not $folder) {
-    Write-Host "Папка не выбрана."
-    Read-Host "Нажмите Enter"
-    exit 1
-}
-if (-not (Test-Path -LiteralPath $folder -PathType Container)) {
-    Write-Host "Папка не найдена: $folder"
-    Read-Host "Нажмите Enter"
-    exit 1
-}
+function Invoke-Main {
+    param([string[]]$Arguments)
 
-while ($true) {
-    Clear-Host
-    Write-Host "============================================"
-    Write-Host "  Video Files Renamer"
-    Write-Host "============================================"
-    Write-Host "  Папка: $folder"
-    Write-Host ""
-    Write-Host "  1. Preview — показать предложения (файлы не меняются)"
-    Write-Host "  2. Preview + применить после ревью"
-    Write-Host "  3. Применить уже готовый preview.csv"
-    Write-Host "  0. Выход"
-    Write-Host ""
-    $choice = Read-Host "Выберите пункт"
+    $folder = $null
+    if ($Arguments.Count -gt 0) {
+        $folder = $Arguments[0]
+    } else {
+        $folder = Select-Folder
+    }
+    if (-not $folder) {
+        Write-Host "Папка не выбрана."
+        Wait-Enter "Нажмите Enter"
+        exit 1
+    }
+    if (-not (Test-Path -LiteralPath $folder -PathType Container)) {
+        Write-Host "Папка не найдена: $folder"
+        Wait-Enter "Нажмите Enter"
+        exit 1
+    }
 
-    switch ($choice) {
-        "1" {
-            if (Invoke-Preview $folder) {
-                Read-Host "Проверьте CSV. Enter — вернуться в меню"
+    while ($true) {
+        Clear-Host
+        Write-Host "============================================"
+        Write-Host "  Video Files Renamer"
+        Write-Host "============================================"
+        Write-Host "  Папка: $folder"
+        Write-Host ""
+        Write-Host "  1. Preview — показать предложения (файлы не меняются)"
+        Write-Host "  2. Preview + применить после ревью"
+        Write-Host "  3. Применить уже готовый preview.csv"
+        Write-Host "  0. Выход"
+        Write-Host ""
+        $choice = Read-Host "Выберите пункт"
+
+        switch ($choice) {
+            "1" {
+                if (Invoke-Preview $folder) {
+                    Read-Host "Проверьте CSV. Enter — вернуться в меню"
+                }
             }
-        }
-        "2" {
-            if (Invoke-Preview $folder) {
-                Write-Host ""
-                Write-Host "Поставьте approved=y для нужных строк, сохраните и закройте Excel."
-                Read-Host "Enter — применить переименование"
+            "2" {
+                if (Invoke-Preview $folder) {
+                    Write-Host ""
+                    Write-Host "Поставьте approved=y для нужных строк, сохраните и закройте Excel."
+                    Read-Host "Enter — применить переименование"
+                    Invoke-Apply $folder
+                }
+            }
+            "3" {
                 Invoke-Apply $folder
             }
-        }
-        "3" {
-            Invoke-Apply $folder
-        }
-        "0" {
-            exit 0
-        }
-        default {
-            Write-Host "Нет такого пункта."
-            Start-Sleep -Seconds 1
+            "0" {
+                exit 0
+            }
+            default {
+                Write-Host "Нет такого пункта."
+                Start-Sleep -Seconds 1
+            }
         }
     }
+}
+
+# Тесты загружают функции через dot-sourcing и не должны попадать в меню.
+if (-not $env:VIDEO_RENAMER_PS_NO_MAIN) {
+    Invoke-Main $args
 }

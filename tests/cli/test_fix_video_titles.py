@@ -213,7 +213,8 @@ def test_preview_reads_api_key_from_dotenv(tmp_path, monkeypatch):
     assert seen["client"] is not None
 
 
-def test_preview_missing_key_warns_and_goes_offline(tmp_path, monkeypatch, capsys):
+def test_preview_missing_key_keeps_secondary_sources_enabled(tmp_path, monkeypatch, capsys):
+    """Нет ключа StashDB — не включает глобальный offline: вторичные источники работают."""
     captured = {}
 
     class FakeService:
@@ -237,9 +238,36 @@ def test_preview_missing_key_warns_and_goes_offline(tmp_path, monkeypatch, capsy
         ]
     )
     assert code == 0
-    assert captured["offline"] is True
+    assert captured["offline"] is False
     assert captured["client"] is None
     assert "STASHDB_API_KEY" in capsys.readouterr().err
+
+
+def test_explicit_offline_disables_all_sources(tmp_path, monkeypatch):
+    captured = {}
+
+    class FakeService:
+        def __init__(self, root, studios, cache, client=None, **kwargs):
+            captured["offline"] = kwargs["offline"]
+
+        def preview(self):
+            return PreviewReport(rows=(), warnings=(), had_transient_errors=False)
+
+    monkeypatch.setenv("STASHDB_API_KEY", "key")
+    monkeypatch.setattr(fix_video_titles, "TitleService", FakeService)
+    code = main(
+        [
+            "preview",
+            str(tmp_path),
+            "--offline",
+            "--csv",
+            str(tmp_path / "p.csv"),
+            "--cache",
+            str(tmp_path / "c.sqlite3"),
+        ]
+    )
+    assert code == 0
+    assert captured["offline"] is True
 
 
 def _fake_service_capturing_nothing():
@@ -751,3 +779,88 @@ def test_append_rename_log_writes_all_fields(tmp_path):
         "scene-42",
         "fingerprint",
     ]
+
+
+def test_apply_refuses_when_journal_cannot_be_prepared(tmp_path, capsys):
+    preview_row = _row(tmp_path, old="old.mp4", new="new.mp4")
+    csv_path = tmp_path / "preview.csv"
+    write_preview_csv(str(csv_path), [preview_row])
+    blocker = tmp_path / "blocker"
+    blocker.write_bytes(b"not a folder")
+
+    code = main(
+        [
+            "apply",
+            str(csv_path),
+            "--root",
+            str(tmp_path),
+            "--apply",
+            "--log",
+            str(blocker / "rename_log.csv"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "cannot prepare rename log" in captured.err
+    assert (tmp_path / "old.mp4").exists()
+    assert not (tmp_path / "new.mp4").exists()
+
+
+def test_csv_guards_source_and_scene_id(tmp_path):
+    path = tmp_path / "preview.csv"
+    row = PreviewRow(True, "-old.mp4", "+new.mp4", "=2+2", 0.5, "=3+3", "@note", "h", 3)
+
+    write_preview_csv(str(path), [row])
+
+    raw = path.read_text(encoding="utf-8-sig")
+    for cell in ("'-old.mp4", "'+new.mp4", "'=2+2", "'=3+3", "'@note"):
+        assert cell in raw
+    assert read_preview_csv(str(path)) == [row]
+
+
+def test_csv_guards_leading_whitespace_formula(tmp_path):
+    path = tmp_path / "preview.csv"
+    row = PreviewRow(True, "a.mp4", " =cmd.mp4", "text", 0.5, "", "\t=cmd", "h", 3)
+
+    write_preview_csv(str(path), [row])
+
+    raw = path.read_text(encoding="utf-8-sig")
+    assert "' =cmd.mp4" in raw
+    assert "'\t=cmd" in raw
+    assert read_preview_csv(str(path)) == [row]
+
+
+def test_csv_roundtrips_quotes_newlines_and_unicode(tmp_path):
+    path = tmp_path / "preview.csv"
+    note = 'строка; с "кавычками"\nи переводом'
+    row = PreviewRow(
+        False,
+        "Видео — 01.mp4",
+        "Студия — Название.mp4",
+        "text",
+        0.42,
+        "id-1",
+        note,
+        "abc",
+        42,
+    )
+
+    write_preview_csv(str(path), [row])
+
+    assert read_preview_csv(str(path)) == [row]
+
+
+def test_old_csv_without_guard_on_source_reads_unchanged(tmp_path):
+    path = tmp_path / "preview.csv"
+    path.write_text(
+        "approved;old;new;source;confidence;scene_id;note;oshash;size\n"
+        "y;a.mp4;b.mp4;=2+2;0.5;=3+3;@note;h;3\n",
+        encoding="utf-8-sig",
+    )
+
+    row = read_preview_csv(str(path))[0]
+
+    assert row.source == "=2+2"
+    assert row.scene_id == "=3+3"
+    assert row.note == "@note"

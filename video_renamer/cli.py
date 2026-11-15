@@ -35,6 +35,7 @@ from video_renamer.core.rename_log import (
     _unguard_formula,
     active_renames,
     format_log_timestamp,
+    log_write_problem,
     read_log,
 )
 from video_renamer.core.review_actions import append_rename_log
@@ -114,7 +115,11 @@ def _ensure_parent(path: str) -> None:
 
 
 def write_preview_csv(path: str, rows: Sequence[PreviewRow]) -> None:
-    """Пишет CSV-ревью в `utf-8-sig` с разделителем `;`."""
+    """Пишет CSV-ревью в `utf-8-sig` с разделителем `;`.
+
+    Все текстовые колонки проходят `_guard_formula`: `source` и `scene_id`
+    тоже приходят из сети и не должны становиться формулами в таблице.
+    """
     _ensure_parent(path)
     with open(path, "w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.writer(handle, delimiter=";")
@@ -125,18 +130,18 @@ def write_preview_csv(path: str, rows: Sequence[PreviewRow]) -> None:
                     "y" if row.approved else "n",
                     _guard_formula(row.old_rel),
                     _guard_formula(row.new_rel),
-                    row.source,
+                    _guard_formula(row.source),
                     str(row.confidence),
-                    row.scene_id,
+                    _guard_formula(row.scene_id),
                     _guard_formula(row.note),
-                    row.oshash,
+                    _guard_formula(row.oshash),
                     "" if row.size is None else str(row.size),
                 )
             )
 
 
 def read_preview_csv(path: str) -> list[PreviewRow]:
-    """Читает CSV-ревью и снимает формула-guard с `old`/`new`."""
+    """Читает CSV-ревью и снимает формула-guard со всех текстовых колонок."""
     with open(path, encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle, delimiter=";")
         fields = reader.fieldnames or []
@@ -153,11 +158,11 @@ def read_preview_csv(path: str) -> list[PreviewRow]:
                     approved=_parse_approved(record.get("approved")),
                     old_rel=_unguard_formula(record.get("old") or ""),
                     new_rel=_unguard_formula(record.get("new") or ""),
-                    source=record.get("source") or "",
+                    source=_unguard_formula(record.get("source") or ""),
                     confidence=_parse_float(record.get("confidence")),
-                    scene_id=record.get("scene_id") or "",
+                    scene_id=_unguard_formula(record.get("scene_id") or ""),
                     note=_unguard_formula(record.get("note") or ""),
-                    oshash=record.get("oshash") or "",
+                    oshash=_unguard_formula(record.get("oshash") or ""),
                     size=_parse_int(record.get("size")),
                 )
             )
@@ -299,10 +304,9 @@ def _run_preview(args: argparse.Namespace, parser: argparse.ArgumentParser) -> i
     offline = bool(args.offline)
     if not api_key and not offline:
         print(
-            "warning: STASHDB_API_KEY is not set; running offline (cache + heuristics)",
+            "warning: STASHDB_API_KEY is not set; StashDB search is disabled (cache + heuristics)",
             file=sys.stderr,
         )
-        offline = True
 
     studios = _load_studios(args.studios)
     if studios is None:
@@ -316,7 +320,7 @@ def _run_preview(args: argparse.Namespace, parser: argparse.ArgumentParser) -> i
         return 2
 
     client = StashDBClient(api_key) if api_key and not offline else None
-    secondary = {} if args.no_secondary else build_fingerprint_clients(os.environ, offline=offline)
+    secondary = {} if args.no_secondary else build_fingerprint_clients(os.environ)
     if not args.no_secondary and not offline:
         for source in missing_secondary_keys(os.environ):
             print(
@@ -384,6 +388,15 @@ def _run_apply(args: argparse.Namespace, _parser: argparse.ArgumentParser) -> in
         print(f"error: cannot read {args.csv}: {exc}", file=sys.stderr)
         return 2
 
+    if args.apply and any(row.approved for row in rows):
+        journal_problem = log_write_problem(args.log)
+        if journal_problem:
+            print(
+                f"error: cannot prepare rename log {args.log}: {journal_problem}",
+                file=sys.stderr,
+            )
+            return 2
+
     report = TitleService(root, {}, None).apply_rows(
         rows,
         dry_run=not args.apply,
@@ -423,8 +436,12 @@ def _run_apply(args: argparse.Namespace, _parser: argparse.ArgumentParser) -> in
     return 1 if (report.had_errors or errors) else 0
 
 
-def _run_undo(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
-    """Список активных строк журнала или откат выбранных; по умолчанию dry-run."""
+def _run_undo(args: argparse.Namespace, _parser: argparse.ArgumentParser) -> int:
+    """Список активных строк журнала или откат выбранных; по умолчанию dry-run.
+
+    `_parser` — часть протокола обработчиков `args.handler(args, parser)`;
+    `undo` не использует общее сообщение об ошибке argparse.
+    """
     if not args.list and not args.ids:
         print("error: undo needs --list or --ids", file=sys.stderr)
         return 2

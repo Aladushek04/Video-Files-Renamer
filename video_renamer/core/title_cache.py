@@ -12,7 +12,8 @@
           через INSERT OR IGNORE (существующие строки не перезаписываются)
     fingerprint_cache(source, algorithm, hash) — сцены источника по фингерпринту
     text_queries(query TEXT PRIMARY KEY, scenes TEXT NOT NULL, fetched_at TEXT NOT NULL)
-    local_phash(oshash, size) — PHASH файла по содержимому, без TTL
+    local_phash(oshash, size) — PHASH файла по содержимому, без TTL;
+        запись действительна только для той же версии файла (mtime_ns/file_id)
 
 Смысл возвращаемого значения:
 
@@ -57,14 +58,28 @@ _SCHEMA = (
     (
         "CREATE TABLE IF NOT EXISTS local_phash ("
         "oshash TEXT NOT NULL, size INTEGER NOT NULL, phash TEXT NOT NULL, "
-        "computed_at TEXT NOT NULL, PRIMARY KEY (oshash, size))"
+        "computed_at TEXT NOT NULL, mtime_ns INTEGER, file_id INTEGER, "
+        "PRIMARY KEY (oshash, size))"
     ),
 )
+# Столбцы свежести появились позже; в старых базах их добавляет миграция.
+_ADD_LOCAL_PHASH_COLUMNS = {
+    "mtime_ns": "ALTER TABLE local_phash ADD COLUMN mtime_ns INTEGER",
+    "file_id": "ALTER TABLE local_phash ADD COLUMN file_id INTEGER",
+}
 _LEGACY_MIGRATION = (
     "INSERT OR IGNORE INTO fingerprint_cache "
     "(source, algorithm, hash, scenes, fetched_at) "
     "SELECT 'StashDB', 'OSHASH', hash, scenes, fetched_at FROM fingerprints"
 )
+
+
+def _migrate_local_phash(conn: sqlite3.Connection) -> None:
+    """Добавляет столбцы свежести в таблицу, созданную до их появления."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(local_phash)")}
+    for column, statement in _ADD_LOCAL_PHASH_COLUMNS.items():
+        if column not in existing:
+            conn.execute(statement)
 
 
 def utcnow() -> datetime:
@@ -110,6 +125,7 @@ class TitleCache:
         try:
             for statement in _SCHEMA:
                 conn.execute(statement)
+            _migrate_local_phash(conn)
             conn.execute(_LEGACY_MIGRATION)
             conn.commit()
         except sqlite3.Error:
@@ -159,26 +175,52 @@ class TitleCache:
                 (source, algorithm, digest, payload, self._now().isoformat()),
             )
 
-    def get_local_phash(self, oshash: str, size: int) -> str | None:
-        """PHASH файла по его содержимому (OSHASH и размер); TTL не действует."""
+    def get_local_phash(
+        self, oshash: str, size: int, mtime_ns: int, file_id: int = 0
+    ) -> str | None:
+        """PHASH файла, если запись сделана для той же версии файла.
+
+        Пара (OSHASH, размер) не доказывает идентичность содержимого: правка в
+        середине файла при том же размере оставляет OSHASH прежним. Поэтому
+        запись принимается только при совпадении `mtime_ns`, а если ОС сообщает
+        `file_id` и он сохранён — ещё и его. Строки без `mtime_ns` (старая
+        схема) считаются неоднозначными и требуют пересчёта.
+        """
         row = (
             self._connection()
             .execute(
-                "SELECT phash FROM local_phash WHERE oshash = ? AND size = ?",
+                "SELECT phash, mtime_ns, file_id FROM local_phash WHERE oshash = ? AND size = ?",
                 (oshash, size),
             )
             .fetchone()
         )
-        return row[0] if row else None
+        if row is None:
+            return None
+        phash, stored_mtime, stored_id = row
+        if stored_mtime is None or stored_mtime != mtime_ns:
+            return None
+        if file_id and stored_id and stored_id != file_id:
+            return None
+        return phash
 
-    def put_local_phash(self, oshash: str, size: int, phash: str) -> None:
-        """Сохраняет PHASH файла по его содержимому."""
+    def put_local_phash(
+        self, oshash: str, size: int, phash: str, mtime_ns: int, file_id: int = 0
+    ) -> None:
+        """Сохраняет PHASH файла вместе с версией файла."""
         conn = self._connection()
         with conn:
             conn.execute(
                 "INSERT OR REPLACE INTO local_phash "
-                "(oshash, size, phash, computed_at) VALUES (?, ?, ?, ?)",
-                (oshash, size, phash, self._now().isoformat()),
+                "(oshash, size, phash, computed_at, mtime_ns, file_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    oshash,
+                    size,
+                    phash,
+                    self._now().isoformat(),
+                    mtime_ns,
+                    file_id or None,
+                ),
             )
 
     def get_text_query(self, term: str) -> list[Scene] | None:

@@ -1,5 +1,9 @@
 """Тесты модели TUI без зависимости от Textual."""
 
+import os
+
+import pytest
+
 from video_renamer.core.title_service import PreviewRow
 from video_renamer.ui.tui_model import ReviewModel
 
@@ -92,3 +96,28 @@ def test_stats_counts_sources_and_approvals():
         "phash": 0,
         "unchanged": 1,
     }
+
+
+def test_model_binding_follows_root_not_display(tmp_path):
+    folder_a = tmp_path / "A"
+    folder_b = tmp_path / "B"
+    folder_a.mkdir()
+    folder_b.mkdir()
+    model = ReviewModel(str(folder_a), [row()])
+
+    assert model.is_for(str(folder_a)) is True
+    assert model.is_for(str(folder_a / ".")) is True
+    assert model.is_for(str(folder_b)) is False
+
+    model.reset_review()
+
+    assert model.folder == ""
+    assert model.rows == []
+    assert model.is_for(str(folder_a)) is False
+
+
+def test_model_binding_ignores_windows_case(tmp_path):
+    if os.name != "nt":
+        pytest.skip("нормализация регистра Windows")
+    model = ReviewModel(str(tmp_path).upper(), [row()])
+    assert model.is_for(str(tmp_path).lower()) is True

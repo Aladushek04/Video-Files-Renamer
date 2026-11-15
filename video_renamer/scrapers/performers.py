@@ -38,6 +38,7 @@ from video_renamer.core.stashdb_client import (
     StashDBResponseError,
     StashDBTransientError,
 )
+from video_renamer.paths import CACHE_DIR, DATA_DIR
 
 __all__ = [
     "DEFAULT_CHECKPOINT",
@@ -51,10 +52,10 @@ __all__ = [
 ]
 
 SOURCE = "stashdb"
-DEFAULT_OUT = "data/performers.json"
-DEFAULT_INDEX = "data/performers_index.json"
-DEFAULT_RAW = "cache/performers_raw.jsonl"
-DEFAULT_CHECKPOINT = "cache/performers_checkpoint.json"
+DEFAULT_OUT = str(DATA_DIR / "performers.json")
+DEFAULT_INDEX = str(DATA_DIR / "performers_index.json")
+DEFAULT_RAW = str(CACHE_DIR / "performers_raw.jsonl")
+DEFAULT_CHECKPOINT = str(CACHE_DIR / "performers_checkpoint.json")
 DEFAULT_PER_PAGE = 1000
 DEFAULT_DELAY = 0.5
 

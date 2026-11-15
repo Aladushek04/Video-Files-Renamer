@@ -106,135 +106,9 @@ class RenamerGUI(ctk.CTk):
         self.sidebar.grid(row=0, column=0, sticky="nsw")
         self.sidebar.pack_propagate(False)
 
-        brand = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        brand.pack(fill="x", padx=18, pady=(22, 6))
-        ctk.CTkFrame(brand, width=5, height=48, corner_radius=3, fg_color=COLORS["accent"]).pack(
-            side="left", padx=(0, 12)
-        )
-        text_block = ctk.CTkFrame(brand, fg_color="transparent")
-        text_block.pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(
-            text_block,
-            text="VIDEO FILES\nRENAMER",
-            anchor="w",
-            justify="left",
-            font=font(20, "bold"),
-            text_color=COLORS["accent"],
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            text_block,
-            text="StashDB · FansDB · ThePornDB",
-            anchor="w",
-            font=font(10),
-            text_color=COLORS["muted"],
-        ).pack(anchor="w", pady=(2, 0))
-
-        self._section_label("ПАПКА С ВИДЕО").pack(fill="x", padx=18, pady=(18, 6))
-        self.folder_entry = ctk.CTkEntry(
-            self.sidebar,
-            height=36,
-            font=font(11),
-            fg_color=COLORS["panel_2"],
-            border_color=COLORS["border_light"],
-            text_color=COLORS["text"],
-            placeholder_text="Путь к папке",
-        )
-        self.folder_entry.pack(fill="x", padx=18)
-        self.folder_entry.bind("<Return>", self._commit_folder)
-        self.browse_button = ctk.CTkButton(
-            self.sidebar,
-            text="Выбрать папку",
-            height=34,
-            font=font(12),
-            fg_color=COLORS["panel_2"],
-            hover_color=COLORS["border_light"],
-            border_width=1,
-            border_color=COLORS["border"],
-            command=self.action_browse,
-        )
-        self.browse_button.pack(fill="x", padx=18, pady=(6, 0))
-
-        self.preview_button = ctk.CTkButton(
-            self.sidebar,
-            text="▶   Preview",
-            height=44,
-            font=font(14, "bold"),
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_hover"],
-            text_color="#041018",
-            command=self.action_preview,
-        )
-        self.preview_button.pack(fill="x", padx=18, pady=(10, 4))
-
-        self._section_label("ИСТОЧНИКИ").pack(fill="x", padx=18, pady=(18, 4))
-        self._source_state_labels: dict[str, ctk.CTkLabel] = {}
-        self._source_dots: dict[str, ctk.CTkLabel] = {}
-        for name in SOURCE_ORDER:
-            row = ctk.CTkFrame(self.sidebar, fg_color="transparent", height=26)
-            row.pack(fill="x", padx=18, pady=1)
-            dot = ctk.CTkLabel(
-                row,
-                text="●",
-                width=16,
-                font=font(12),
-                text_color=COLORS["muted"],
-            )
-            dot.pack(side="left")
-            ctk.CTkLabel(
-                row,
-                text=name,
-                anchor="w",
-                font=font(12),
-                text_color=COLORS["text"],
-            ).pack(side="left", padx=(2, 0))
-            state = ctk.CTkLabel(
-                row,
-                text="",
-                anchor="e",
-                font=font(10),
-                text_color=COLORS["muted"],
-            )
-            state.pack(side="right")
-            self._source_dots[name] = dot
-            self._source_state_labels[name] = state
-
-        self.catalog_label = ctk.CTkLabel(
-            self.sidebar,
-            text="",
-            anchor="w",
-            font=font(10),
-            text_color=COLORS["muted"],
-        )
-        self.catalog_label.pack(fill="x", padx=18, pady=(4, 0))
-
-        self._section_label("СТАТИСТИКА").pack(fill="x", padx=18, pady=(18, 6))
-        stats_card = ctk.CTkFrame(
-            self.sidebar,
-            fg_color=COLORS["panel_2"],
-            corner_radius=10,
-        )
-        stats_card.pack(fill="x", padx=18)
-        self._stat_labels: dict[str, ctk.CTkLabel] = {}
-        for key, label, color in STAT_ROWS:
-            row = ctk.CTkFrame(stats_card, fg_color="transparent", height=24)
-            row.pack(fill="x", padx=12, pady=1)
-            ctk.CTkLabel(
-                row,
-                text=label,
-                anchor="w",
-                font=font(11),
-                text_color=COLORS["muted"],
-            ).pack(side="left")
-            value = ctk.CTkLabel(
-                row,
-                text="0",
-                anchor="e",
-                font=font(12, "bold"),
-                text_color=color,
-            )
-            value.pack(side="right")
-            self._stat_labels[key] = value
-
+        # Нижний блок пакуется первым: `pack` отдаёт ему место до прокручиваемой
+        # середины, поэтому кнопки справочника и журнала видны и на минимальной
+        # высоте окна (1180×700), а не обрезаются за его границей.
         footer = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         footer.pack(side="bottom", fill="x", padx=18, pady=(8, 16))
         self.studio_button = ctk.CTkButton(
@@ -263,7 +137,7 @@ class RenamerGUI(ctk.CTk):
             anchor="w",
             justify="left",
             wraplength=264,
-            font=font(10),
+            font=font(11),
             text_color=COLORS["muted"],
         )
         self.update_label.pack(fill="x", pady=(10, 0))
@@ -277,9 +151,154 @@ class RenamerGUI(ctk.CTk):
             text="Space — одобрить/снять · Ctrl+Enter — применить\n↑/↓ — строка · F5 — Preview · Esc — снять выделение",
             anchor="w",
             justify="left",
-            font=font(9),
+            font=font(10),
             text_color=COLORS["muted"],
         ).pack(fill="x", pady=(8, 0))
+
+        # Всё остальное — в прокручиваемой области: при малой высоте и при
+        # масштабировании 125–150% содержимое не пропадает и не перекрывает
+        # нижний блок.
+        self.sidebar_body = ctk.CTkScrollableFrame(
+            self.sidebar,
+            fg_color="transparent",
+            corner_radius=0,
+            width=280,
+            scrollbar_button_color=COLORS["border"],
+            scrollbar_button_hover_color=COLORS["border_light"],
+        )
+        self.sidebar_body.pack(fill="both", expand=True)
+        body = self.sidebar_body
+
+        brand = ctk.CTkFrame(body, fg_color="transparent")
+        brand.pack(fill="x", padx=18, pady=(16, 4))
+        ctk.CTkFrame(brand, width=5, height=48, corner_radius=3, fg_color=COLORS["accent"]).pack(
+            side="left", padx=(0, 12)
+        )
+        text_block = ctk.CTkFrame(brand, fg_color="transparent")
+        text_block.pack(side="left", fill="x", expand=True)
+        ctk.CTkLabel(
+            text_block,
+            text="VIDEO FILES\nRENAMER",
+            anchor="w",
+            justify="left",
+            font=font(20, "bold"),
+            text_color=COLORS["accent"],
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            text_block,
+            text="StashDB · FansDB · ThePornDB",
+            anchor="w",
+            font=font(11),
+            text_color=COLORS["muted"],
+        ).pack(anchor="w", pady=(2, 0))
+
+        self._section_label("ПАПКА С ВИДЕО").pack(fill="x", padx=18, pady=(14, 4))
+        self.folder_entry = ctk.CTkEntry(
+            body,
+            height=36,
+            font=font(11),
+            fg_color=COLORS["panel_2"],
+            border_color=COLORS["border_light"],
+            text_color=COLORS["text"],
+            placeholder_text="Путь к папке",
+        )
+        self.folder_entry.pack(fill="x", padx=18)
+        self.folder_entry.bind("<Return>", self._commit_folder)
+        self.browse_button = ctk.CTkButton(
+            body,
+            text="Выбрать папку",
+            height=34,
+            font=font(12),
+            fg_color=COLORS["panel_2"],
+            hover_color=COLORS["border_light"],
+            border_width=1,
+            border_color=COLORS["border"],
+            command=self.action_browse,
+        )
+        self.browse_button.pack(fill="x", padx=18, pady=(6, 0))
+
+        self.preview_button = ctk.CTkButton(
+            body,
+            text="▶   Preview",
+            height=44,
+            font=font(14, "bold"),
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"],
+            text_color="#041018",
+            command=self.action_preview,
+        )
+        self.preview_button.pack(fill="x", padx=18, pady=(8, 4))
+
+        self._section_label("ИСТОЧНИКИ").pack(fill="x", padx=18, pady=(14, 4))
+        self._source_state_labels: dict[str, ctk.CTkLabel] = {}
+        self._source_dots: dict[str, ctk.CTkLabel] = {}
+        for name in SOURCE_ORDER:
+            row = ctk.CTkFrame(body, fg_color="transparent", height=26)
+            row.pack(fill="x", padx=18, pady=1)
+            dot = ctk.CTkLabel(
+                row,
+                text="●",
+                width=16,
+                font=font(12),
+                text_color=COLORS["muted"],
+            )
+            dot.pack(side="left")
+            ctk.CTkLabel(
+                row,
+                text=name,
+                anchor="w",
+                font=font(12),
+                text_color=COLORS["text"],
+            ).pack(side="left", padx=(2, 0))
+            state = ctk.CTkLabel(
+                row,
+                text="",
+                anchor="e",
+                font=font(11),
+                text_color=COLORS["muted"],
+            )
+            state.pack(side="right")
+            self._source_dots[name] = dot
+            self._source_state_labels[name] = state
+
+        self.catalog_label = ctk.CTkLabel(
+            body,
+            text="",
+            anchor="w",
+            justify="left",
+            wraplength=264,
+            font=font(11),
+            text_color=COLORS["muted"],
+        )
+        self.catalog_label.pack(fill="x", padx=18, pady=(4, 0))
+
+        self._section_label("СТАТИСТИКА").pack(fill="x", padx=18, pady=(14, 4))
+        self.stats_card = ctk.CTkFrame(
+            body,
+            fg_color=COLORS["panel_2"],
+            corner_radius=10,
+        )
+        self.stats_card.pack(fill="x", padx=18, pady=(0, 6))
+        self._stat_labels: dict[str, ctk.CTkLabel] = {}
+        for key, label, color in STAT_ROWS:
+            row = ctk.CTkFrame(self.stats_card, fg_color="transparent", height=22)
+            row.pack(fill="x", padx=12, pady=1)
+            ctk.CTkLabel(
+                row,
+                text=label,
+                anchor="w",
+                font=font(12),
+                text_color=COLORS["muted"],
+            ).pack(side="left")
+            value = ctk.CTkLabel(
+                row,
+                text="0",
+                anchor="e",
+                font=font(13, "bold"),
+                text_color=color,
+            )
+            value.pack(side="right")
+            self._stat_labels[key] = value
 
     def _build_main(self) -> None:
         self.main = ctk.CTkFrame(self, fg_color=COLORS["bg"], corner_radius=0)
@@ -466,10 +485,10 @@ class RenamerGUI(ctk.CTk):
 
     def _section_label(self, text: str) -> ctk.CTkLabel:
         return ctk.CTkLabel(
-            self.sidebar,
+            self.sidebar_body,
             text=text,
             anchor="w",
-            font=font(10, "bold"),
+            font=font(11, "bold"),
             text_color=COLORS["muted"],
         )
 
@@ -509,7 +528,10 @@ class RenamerGUI(ctk.CTk):
                 text="ключ найден" if configured else "нет ключа",
                 text_color=COLORS["green_text"] if configured else COLORS["muted"],
             )
-        self.catalog_label.configure(text=self.controller.catalog_text())
+        self.catalog_label.configure(
+            text=self.controller.catalog_text(),
+            text_color=COLORS["red_text"] if self.controller.studios_problem else COLORS["muted"],
+        )
         if self._update_status_text:
             self.update_label.configure(
                 text=f"Git: {self._update_status_text}",
@@ -541,24 +563,58 @@ class RenamerGUI(ctk.CTk):
         self._apply_folder(self.folder_entry.get())
 
     def _apply_folder(self, folder: str, *, notify: bool = True) -> bool:
+        """Выбирает папку; ревью другого корня не перепривязывается молча."""
         try:
-            path = self.controller.set_folder(folder)
+            path = self.controller.resolve_folder(folder)
         except ValueError as exc:
-            if notify:
-                show_notice(
-                    self,
-                    "Папка",
-                    str(exc),
-                    accent=COLORS["red"],
-                    height=240,
-                )
-            else:
-                self._set_status(str(exc), "error")
+            self._folder_error(str(exc), notify)
+            return False
+        if self.controller.folder_change_needs_confirmation(path):
+            previous = self.controller.review_root
+            if not ask_confirm(
+                self,
+                "Сменить папку?",
+                f"В таблице остались предложения для папки:\n{previous}\n\n"
+                f"Новая папка:\n{path}\n\n"
+                "Строки и одобрения будут сброшены; для новой папки нужен новый Preview.",
+                confirm_text="Сменить и сбросить",
+                accent=COLORS["orange"],
+                width=640,
+                height=330,
+            ):
+                self._restore_folder_entry()
+                self._set_status("Смена папки отменена", "warn")
+                return False
+            self.controller.discard_review()
+            self.selected_index = None
+        try:
+            self.controller.set_folder(str(path))
+        except ValueError as exc:  # папка исчезла между проверкой и установкой
+            self._folder_error(str(exc), notify)
             return False
         self.folder_entry.delete(0, "end")
         self.folder_entry.insert(0, str(path))
+        self._refresh_rows()
         self._set_status(f"Папка: {path}", "info")
         return True
+
+    def _restore_folder_entry(self) -> None:
+        """Возвращает в поле ранее выбранную папку после отмены смены."""
+        self.folder_entry.delete(0, "end")
+        if self.controller.folder is not None:
+            self.folder_entry.insert(0, str(self.controller.folder))
+
+    def _folder_error(self, message: str, notify: bool) -> None:
+        if notify:
+            show_notice(
+                self,
+                "Папка",
+                message,
+                accent=COLORS["red"],
+                height=240,
+            )
+        else:
+            self._set_status(message, "error")
 
     # --- preview / apply -------------------------------------------------
 
@@ -661,16 +717,32 @@ class RenamerGUI(ctk.CTk):
         if not approved:
             self._set_status("Нет одобренных строк", "warn")
             return
+        if not self.controller.model.folder or self.controller.review_stale:
+            self._set_status("Папка изменилась после Preview: выполните Preview заново", "warn")
+            return
         counts: dict[str, int] = {}
         for row in approved:
             counts[row.source] = counts.get(row.source, 0) + 1
         summary = ", ".join(
             f"{source_label(source)}: {count}" for source, count in sorted(counts.items())
         )
+        # Корень берётся из того же неизменяемого ревью, что использует run_apply,
+        # а не из редактируемого поля папки.
+        root = self.controller.review_root
+        if not root:
+            self._set_status("Ревью не привязано к папке: выполните Preview", "warn")
+            return
+        examples = [f"{item.old_rel} → {item.new_rel}" for item in approved[:3]]
+        if len(approved) > 3:
+            examples.append(f"… и ещё {len(approved) - 3}")
         message = (
-            f"Переименовать {len(approved)} файлов?\n\n"
+            f"Папка:\n{root}\n\n"
+            f"Будет переименовано: {len(approved)} из {len(self.controller.model.rows)}\n"
             f"{summary}\n\n"
-            "Проверьте имена: операция изменяет файлы на диске."
+            "Примеры:\n" + "\n".join(examples) + "\n\n"
+            f"Журнал: {self.controller.log_path}\n"
+            "Операция сразу изменяет файлы на диске. Откат — через журнал, "
+            "если он записан и файлы не менялись."
         )
         if not ask_confirm(
             self,
@@ -679,7 +751,7 @@ class RenamerGUI(ctk.CTk):
             confirm_text="Применить",
             accent=COLORS["green"],
             width=620,
-            height=340,
+            height=440,
         ):
             return
         rows = list(approved)
@@ -700,12 +772,14 @@ class RenamerGUI(ctk.CTk):
         self._set_busy(False)
         self._refresh_rows(reset_scroll=True)
         renamed = sum(1 for item in report.results if item.status == "renamed")
+        # Оставшиеся строки модели включают неодобренные: считать по ним
+        # «ошибки» нельзя, ошибки — только строки отчёта со статусом error.
+        errors = sum(1 for item in report.results if item.status == "error")
         if log_error:
             self._set_status("Переименовано, но журнал не записан", "warn")
-        elif report.had_errors and self.controller.model.rows:
+        elif errors:
             self._set_status(
-                f"Применено: {renamed}; строк с ошибками осталось: "
-                f"{len(self.controller.model.rows)}",
+                f"Применено: {renamed}; строк с ошибками: {errors}",
                 "warn",
             )
         else:
@@ -950,9 +1024,8 @@ class RenamerGUI(ctk.CTk):
             state="normal" if editable and bool(row.candidates) else "disabled"
         )
         has_approved = bool(self.controller.model.approved_rows())
-        self.apply_button.configure(
-            state="normal" if has_approved and not self._busy else "disabled"
-        )
+        can_apply = has_approved and not self._busy and not self.controller.review_stale
+        self.apply_button.configure(state="normal" if can_apply else "disabled")
 
     def _set_status(self, text: str, kind: str = "info") -> None:
         colors = {

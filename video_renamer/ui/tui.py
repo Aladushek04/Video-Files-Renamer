@@ -48,6 +48,7 @@ from video_renamer.core.review_actions import (
     load_performer_index,
     remove_renamed,
     run_preview,
+    studios_catalog,
     validate_basename,
 )
 from video_renamer.core.stashdb_client import Scene
@@ -61,8 +62,9 @@ from video_renamer.core.title_service import (
 from video_renamer.core.undo import run_undo, select_for_undo
 from video_renamer.paths import (
     LOG_PATH,
-    STUDIOS_PATH,
     load_project_env,
+    resolve_studios_path,
+    same_folder,
 )
 from video_renamer.ui.studio_tasks import run as run_studio_task
 from video_renamer.ui.tui_model import FILTERS, ReviewModel
@@ -267,8 +269,11 @@ class ConfirmApply(ModalScreen[bool]):
                 f"Fingerprint: {self.sources.get('fingerprint', 0)} · "
                 f"Текст: {self.sources.get('text', 0)} · "
                 f"Эвристика: {self.sources.get('heuristic', 0)}\n\n"
-                "Переименование выполняется сразу, отменить его нельзя. "
-                f"Журнал операций: {self.log_path}.",
+                "Переименование выполняется сразу.\n"
+                f"Откат — через журнал (клавиша u): {self.log_path}\n"
+                "Он сработает, только если журнал записан, а файлы после "
+                "переименования не менялись; при сбое журнала автоматический "
+                "откат недоступен.",
                 classes="modal-body",
                 id="confirm-body",
             )
@@ -278,6 +283,37 @@ class ConfirmApply(ModalScreen[bool]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "confirm-apply")
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
+class ConfirmFolderSwitch(ModalScreen[bool]):
+    """Подтверждение смены папки: строки другого корня будут сброшены."""
+
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "cancel", "Отмена")]
+
+    def __init__(self, review_root: str, new_root: str) -> None:
+        super().__init__()
+        self.review_root = review_root
+        self.new_root = new_root
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="folder-dialog"):
+            yield Static("Сменить папку?", classes="modal-title")
+            yield Static(
+                f"В таблице остались предложения для папки:\n{self.review_root}\n\n"
+                f"Новая папка:\n{self.new_root}\n\n"
+                "Строки и одобрения будут сброшены; для новой папки нужен новый Preview.",
+                classes="modal-body",
+                id="folder-body",
+            )
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Отмена", id="folder-cancel")
+                yield Button("Сменить и сбросить", id="folder-confirm", variant="warning")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "folder-confirm")
 
     def action_cancel(self) -> None:
         self.dismiss(False)
@@ -817,7 +853,7 @@ class RenamerApp(App[None]):
     ) -> None:
         super().__init__()
         self.folder: Path | None = Path(folder) if folder else None
-        self.model = ReviewModel(str(self.folder) if self.folder else "", [])
+        self.model = ReviewModel("", [])
         self._preview_factory = preview_factory
         self._apply_factory = apply_factory
         self.log_path = log_path or str(LOG_PATH)
@@ -889,14 +925,24 @@ class RenamerApp(App[None]):
         self.query_one("#folder", Input).focus()
 
     def _update_environment(self) -> None:
-        key_status = "StashDB: ключ найден" if self.key else "StashDB: ключа нет — offline"
+        key_status = (
+            "StashDB: ключ найден" if self.key else "StashDB: ключа нет — поиск StashDB недоступен"
+        )
         self.query_one("#api-status", Static).update(Text(key_status))
-        studios = STUDIOS_PATH
-        if studios.exists():
-            size = studios.stat().st_size / (1024 * 1024)
-            db_status = f"Справочник: {size:.1f} MB"
+        _studios, problem = studios_catalog()
+        if problem == "missing":
+            db_status = "Справочник: studios.json не найден — поиск студий отключён"
+        elif problem:
+            reason = problem.removeprefix("unreadable: ").strip()
+            db_status = f"Справочник повреждён: {reason[:80]} — поиск студий отключён"
         else:
-            db_status = "Справочник: studios.json не найден"
+            studios = resolve_studios_path()
+            try:
+                size = studios.stat().st_size / (1024 * 1024)
+            except OSError:
+                db_status = "Справочник: размер недоступен"
+            else:
+                db_status = f"Справочник: {size:.1f} MB"
         self.query_one("#db-status", Static).update(Text(db_status))
 
     def _set_status(self, text: str) -> None:
@@ -1036,18 +1082,53 @@ class RenamerApp(App[None]):
                 self._update_detail(target)
                 return
 
-    def _set_folder(self, folder: str) -> None:
+    def _set_folder(self, folder: str, then: Callable[[], None] | None = None) -> None:
+        """Запоминает папку; ревью другого корня сбрасывается после подтверждения."""
         folder = folder.strip().strip('"')
         if not folder:
+            self._restore_folder_input()
             return
-        path = Path(folder)
+        path = Path(folder).expanduser()
         if not path.is_dir():
             self.notify("Папка не найдена", severity="error")
+            self._restore_folder_input()
             return
+        if self.model.rows and not self.model.is_for(str(path)):
+            self.push_screen(
+                ConfirmFolderSwitch(self.model.folder, str(path)),
+                lambda confirmed: self._folder_switch_done(confirmed, path, then),
+            )
+            return
+        self._adopt_folder(path, then=then)
+
+    def _folder_switch_done(
+        self, confirmed: bool | None, path: Path, then: Callable[[], None] | None
+    ) -> None:
+        if not confirmed:
+            self._restore_folder_input()
+            self._set_status("Смена папки отменена")
+            return
+        self._adopt_folder(path, discard=True, then=then)
+
+    def _adopt_folder(
+        self,
+        path: Path,
+        *,
+        discard: bool = False,
+        then: Callable[[], None] | None = None,
+    ) -> None:
+        if discard:
+            self.model.reset_review()
+            self._refresh_table()
         self.folder = path
-        self.model.folder = str(path)
         self.query_one("#folder", Input).value = str(path)
         self._set_status(f"Папка: {path}")
+        if then is not None:
+            then()
+
+    def _restore_folder_input(self) -> None:
+        value = str(self.folder) if self.folder else ""
+        self.query_one("#folder", Input).value = value
 
     # --- actions ---------------------------------------------------------
 
@@ -1093,7 +1174,11 @@ class RenamerApp(App[None]):
         if not folder or not Path(folder).is_dir():
             self.notify("Выберите существующую папку", severity="error")
             return
-        self._set_folder(folder)
+        self._set_folder(folder, then=self._start_preview)
+
+    def _start_preview(self) -> None:
+        if self._busy or self.folder is None:
+            return
         self._set_busy(True, "Загружаю справочник...")
         self._preview_worker(str(self.folder))
 
@@ -1126,8 +1211,16 @@ class RenamerApp(App[None]):
         self.call_from_thread(self._preview_done, folder, report)
 
     def _preview_done(self, folder: str, report: PreviewReport) -> None:
-        self.model = ReviewModel(folder, list(report.rows))
         self._set_busy(False)
+        if self.folder is None or not same_folder(folder, str(self.folder)):
+            self._set_status("Папка изменилась во время preview")
+            self.notify(
+                "Папка изменилась во время preview — повторите Preview",
+                severity="warning",
+                timeout=8,
+            )
+            return
+        self.model = ReviewModel(str(self.folder), list(report.rows))
         self._refresh_table()
         self.query_one("#table", DataTable).focus()
         self._set_status(
@@ -1163,7 +1256,8 @@ class RenamerApp(App[None]):
     def action_undo_log(self) -> None:
         if isinstance(self.screen, ModalScreen):
             return
-        self.push_screen(UndoLogScreen(self.log_path, str(self.model.folder)))
+        root = self.model.folder or (str(self.folder) if self.folder else "")
+        self.push_screen(UndoLogScreen(self.log_path, root))
 
     def action_studios(self) -> None:
         if self._busy:
@@ -1253,6 +1347,11 @@ class RenamerApp(App[None]):
         if not approved:
             self.notify("Нет одобренных строк", severity="warning")
             return
+        if not self.model.folder or (
+            self.model.rows and not self.model.is_for(str(self.folder or ""))
+        ):
+            self.notify("Папка изменилась после Preview", severity="warning")
+            return
         sources: dict[str, int] = {}
         for row in approved:
             sources[row.source] = sources.get(row.source, 0) + 1
@@ -1278,9 +1377,12 @@ class RenamerApp(App[None]):
 
     def _apply_worker_impl(self, rows: list[PreviewRow]) -> tuple[ApplyReport, str]:
         """Переименовывает строки; сбой журнала не отменяет результат apply."""
+        root = self.model.folder
+        if not root:
+            raise ValueError("Ревью не привязано к папке: выполните Preview")
         if self._apply_factory is not None:
             return self._apply_factory(rows), ""
-        return apply_rows(str(self.model.folder), rows, log_path=self.log_path)
+        return apply_rows(root, rows, log_path=self.log_path)
 
     def _apply_done(self, report: ApplyReport, log_error: str = "") -> None:
         self._set_busy(False)
@@ -1295,8 +1397,9 @@ class RenamerApp(App[None]):
                 severity="warning",
                 timeout=10,
             )
-        elif report.had_errors and kept:
-            self._set_status(f"Применено: {len(renamed)}; строк с ошибками осталось: {len(kept)}")
+        elif report.had_errors:
+            errors = sum(1 for item in report.results if item.status == "error")
+            self._set_status(f"Применено: {len(renamed)}; строк с ошибками: {errors}")
         else:
             self._set_status(f"Применено: {len(renamed)}")
         self.push_screen(ApplyResultModal(report, log_path=str(self.log_path), log_error=log_error))
@@ -1321,7 +1424,8 @@ class RenamerApp(App[None]):
         except (TypeError, ValueError):
             pass
 
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+    def on_data_table_row_selected(self, _event: DataTable.RowSelected) -> None:
+        # `_event` обязателен для диспетчера сообщений Textual.
         self.action_toggle()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

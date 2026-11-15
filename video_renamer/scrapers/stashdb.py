@@ -38,6 +38,7 @@ from video_renamer.core.stashdb_client import (
     Studio,
 )
 from video_renamer.core.studio_filters import filter_studio_names
+from video_renamer.paths import DATA_DIR
 
 __all__ = [
     "DEFAULT_CHECKPOINT",
@@ -63,9 +64,9 @@ __all__ = [
     "save_raw",
 ]
 
-DEFAULT_OUT = "data/studios.json"
-DEFAULT_CHECKPOINT = "data/studios_checkpoint.json"
-DEFAULT_RAW = "data/studios_raw.json"
+DEFAULT_OUT = str(DATA_DIR / "studios.json")
+DEFAULT_CHECKPOINT = str(DATA_DIR / "studios_checkpoint.json")
+DEFAULT_RAW = str(DATA_DIR / "studios_raw.json")
 DEFAULT_PER_PAGE = 100
 DEFAULT_DELAY = 1.0
 
@@ -98,9 +99,9 @@ FANSDB_SOURCE = StudioSource(
     endpoint="https://fansdb.cc/graphql",
     api_key_env="FANSDB_API_KEY",
     script="python -m video_renamer.scrapers.fansdb",
-    default_out="data/studios_fansdb.json",
-    default_checkpoint="data/studios_fansdb_checkpoint.json",
-    default_raw="data/studios_fansdb_raw.json",
+    default_out=str(DATA_DIR / "studios_fansdb.json"),
+    default_checkpoint=str(DATA_DIR / "studios_fansdb_checkpoint.json"),
+    default_raw=str(DATA_DIR / "studios_fansdb_raw.json"),
 )
 
 THEPORNDB_SOURCE = StudioSource(
@@ -108,9 +109,9 @@ THEPORNDB_SOURCE = StudioSource(
     endpoint="https://theporndb.net/graphql",
     api_key_env="THE_PORNDB_API_KEY",
     script="python -m video_renamer.scrapers.theporndb",
-    default_out="data/studios_theporndb.json",
-    default_checkpoint="data/studios_theporndb_checkpoint.json",
-    default_raw="data/studios_theporndb_raw.json",
+    default_out=str(DATA_DIR / "studios_theporndb.json"),
+    default_checkpoint=str(DATA_DIR / "studios_theporndb_checkpoint.json"),
+    default_raw=str(DATA_DIR / "studios_theporndb_raw.json"),
 )
 
 # Ключ для группировки коллизий: дополнительно к `normalize_key` убираем

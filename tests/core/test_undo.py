@@ -204,3 +204,152 @@ def test_undo_reports_unwritten_journal(tmp_path, monkeypatch):
     assert report.results[0].status == "journal-missing"
     assert (tmp_path / "a.mp4").exists()
     assert active_renames(entries_of(log)) != []
+
+
+MOMENT_1 = datetime(2026, 11, 6, 10, 0, 0, tzinfo=timezone.utc)
+MOMENT_2 = datetime(2026, 11, 6, 10, 1, 0, tzinfo=timezone.utc)
+MOMENT_3 = datetime(2026, 11, 6, 10, 2, 0, tzinfo=timezone.utc)
+
+
+def sequential_chain(tmp_path, log, moments=MOMENT_1):
+    write(tmp_path / "a.mp4", b"a" * 100)
+    apply_pairs(tmp_path, log, [("a.mp4", "b.mp4")], moment=moments)
+    apply_pairs(tmp_path, log, [("b.mp4", "c.mp4")], moment=moments)
+    return [entry.id for entry in active_renames(entries_of(log))]
+
+
+def test_undo_sequential_renames_of_one_file(tmp_path):
+    log = tmp_path / "rename_log.csv"
+    write(tmp_path / "a.mp4", b"a" * 100)
+    apply_pairs(tmp_path, log, [("a.mp4", "b.mp4")], moment=MOMENT_1)
+    apply_pairs(tmp_path, log, [("b.mp4", "c.mp4")], moment=MOMENT_2)
+    ids = [entry.id for entry in active_renames(entries_of(log))]
+
+    report = run_undo(select_for_undo(entries_of(log), ids), log_path=str(log), dry_run=False)
+
+    assert report.had_errors is False
+    assert (tmp_path / "a.mp4").read_bytes() == b"a" * 100
+    assert not (tmp_path / "b.mp4").exists()
+    assert not (tmp_path / "c.mp4").exists()
+    assert active_renames(entries_of(log)) == []
+    assert len([entry for entry in entries_of(log) if entry.action == "undo"]) == 2
+
+
+def test_undo_three_sequential_renames(tmp_path):
+    log = tmp_path / "rename_log.csv"
+    write(tmp_path / "a.mp4", b"a" * 100)
+    apply_pairs(tmp_path, log, [("a.mp4", "b.mp4")], moment=MOMENT_1)
+    apply_pairs(tmp_path, log, [("b.mp4", "c.mp4")], moment=MOMENT_2)
+    apply_pairs(tmp_path, log, [("c.mp4", "d.mp4")], moment=MOMENT_3)
+    ids = [entry.id for entry in active_renames(entries_of(log))]
+
+    report = run_undo(select_for_undo(entries_of(log), ids), log_path=str(log), dry_run=False)
+
+    assert report.had_errors is False
+    assert [result.status for result in report.results] == ["renamed"] * 3
+    assert (tmp_path / "a.mp4").exists()
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["a.mp4", "rename_log.csv"]
+
+
+def test_undo_sequential_keeps_other_files_touched(tmp_path):
+    log = tmp_path / "rename_log.csv"
+    write(tmp_path / "a.mp4", b"a" * 100)
+    write(tmp_path / "x.mp4", b"x" * 100)
+    apply_pairs(tmp_path, log, [("a.mp4", "b.mp4"), ("x.mp4", "y.mp4")], moment=MOMENT_1)
+    apply_pairs(tmp_path, log, [("b.mp4", "c.mp4")], moment=MOMENT_2)
+    ids = [entry.id for entry in active_renames(entries_of(log))]
+
+    report = run_undo(select_for_undo(entries_of(log), ids), log_path=str(log), dry_run=False)
+
+    assert report.had_errors is False
+    assert (tmp_path / "a.mp4").exists()
+    assert (tmp_path / "x.mp4").exists()
+    assert not (tmp_path / "c.mp4").exists()
+    assert not (tmp_path / "y.mp4").exists()
+
+
+def test_undo_only_newest_step_of_sequence(tmp_path):
+    log = tmp_path / "rename_log.csv"
+    write(tmp_path / "a.mp4", b"a" * 100)
+    apply_pairs(tmp_path, log, [("a.mp4", "b.mp4")], moment=MOMENT_1)
+    apply_pairs(tmp_path, log, [("b.mp4", "c.mp4")], moment=MOMENT_2)
+    entries = entries_of(log)
+    newest = next(entry for entry in active_renames(entries) if entry.old == "b.mp4")
+
+    report = run_undo(select_for_undo(entries, [newest.id]), log_path=str(log), dry_run=False)
+
+    assert report.had_errors is False
+    assert (tmp_path / "b.mp4").exists()
+    assert not (tmp_path / "c.mp4").exists()
+    assert len(active_renames(entries_of(log))) == 1
+
+
+def test_undo_only_oldest_step_of_sequence_fails_cleanly(tmp_path):
+    log = tmp_path / "rename_log.csv"
+    write(tmp_path / "a.mp4", b"a" * 100)
+    apply_pairs(tmp_path, log, [("a.mp4", "b.mp4")], moment=MOMENT_1)
+    apply_pairs(tmp_path, log, [("b.mp4", "c.mp4")], moment=MOMENT_2)
+    entries = entries_of(log)
+    oldest = next(entry for entry in active_renames(entries) if entry.old == "a.mp4")
+
+    report = run_undo(select_for_undo(entries, [oldest.id]), log_path=str(log), dry_run=False)
+
+    assert report.had_errors is True
+    assert report.results[0].status == "error"
+    assert "cannot stat old path" in report.results[0].message
+    assert (tmp_path / "c.mp4").read_bytes() == b"a" * 100
+    assert not (tmp_path / "b.mp4").exists()
+    assert len(active_renames(entries_of(log))) == 2
+
+
+def test_undo_sequential_dry_run_predicts_without_changes(tmp_path):
+    log = tmp_path / "rename_log.csv"
+    write(tmp_path / "a.mp4", b"a" * 100)
+    apply_pairs(tmp_path, log, [("a.mp4", "b.mp4")], moment=MOMENT_1)
+    apply_pairs(tmp_path, log, [("b.mp4", "c.mp4")], moment=MOMENT_2)
+    before = log.read_bytes()
+    ids = [entry.id for entry in active_renames(entries_of(log))]
+
+    report = run_undo(select_for_undo(entries_of(log), ids), log_path=str(log), dry_run=True)
+
+    assert report.had_errors is False
+    assert [result.status for result in report.results] == ["dry-run", "dry-run"]
+    assert (tmp_path / "c.mp4").exists()
+    assert not (tmp_path / "b.mp4").exists()
+    assert not (tmp_path / "a.mp4").exists()
+    assert log.read_bytes() == before
+    assert len(active_renames(entries_of(log))) == 2
+
+
+def test_undo_sequential_dry_run_reports_missing_file(tmp_path):
+    log = tmp_path / "rename_log.csv"
+    write(tmp_path / "a.mp4", b"a" * 100)
+    apply_pairs(tmp_path, log, [("a.mp4", "b.mp4")], moment=MOMENT_1)
+    apply_pairs(tmp_path, log, [("b.mp4", "c.mp4")], moment=MOMENT_2)
+    (tmp_path / "c.mp4").unlink()
+    ids = [entry.id for entry in active_renames(entries_of(log))]
+
+    report = run_undo(select_for_undo(entries_of(log), ids), log_path=str(log), dry_run=True)
+
+    assert report.had_errors is True
+    assert report.results[0].status == "error"
+    assert "cannot stat old path" in report.results[0].message
+
+
+def test_undo_sequential_continues_after_occupied_target(tmp_path):
+    log = tmp_path / "rename_log.csv"
+    write(tmp_path / "a.mp4", b"a" * 100)
+    write(tmp_path / "x.mp4", b"x" * 100)
+    apply_pairs(tmp_path, log, [("a.mp4", "b.mp4")], moment=MOMENT_1)
+    apply_pairs(tmp_path, log, [("b.mp4", "c.mp4")], moment=MOMENT_2)
+    apply_pairs(tmp_path, log, [("x.mp4", "y.mp4")], moment=MOMENT_3)
+    write(tmp_path / "y.mp4", b"occupied")
+    ids = [entry.id for entry in active_renames(entries_of(log))]
+
+    report = run_undo(select_for_undo(entries_of(log), ids), log_path=str(log), dry_run=False)
+
+    statuses = {(result.old_rel, result.status) for result in report.results}
+    assert ("a.mp4", "renamed") in statuses or ("b.mp4", "renamed") in statuses
+    assert report.had_errors is True
+    assert (tmp_path / "a.mp4").exists()
+    assert (tmp_path / "y.mp4").read_bytes() == b"occupied"

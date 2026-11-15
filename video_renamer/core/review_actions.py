@@ -21,6 +21,7 @@ from video_renamer.core.rename_log import (
     LogEntry,
     append_log,
     format_log_timestamp,
+    log_write_problem,
 )
 from video_renamer.core.stashdb_client import StashDBClient
 from video_renamer.core.title_cache import TitleCache
@@ -33,7 +34,11 @@ from video_renamer.core.title_service import (
     ProgressEvent,
     TitleService,
 )
-from video_renamer.paths import CACHE_PATH, PERFORMERS_INDEX_PATH, STUDIOS_PATH
+from video_renamer.paths import (
+    CACHE_PATH,
+    PERFORMERS_INDEX_PATH,
+    resolve_studios_path,
+)
 
 __all__ = [
     "append_rename_log",
@@ -44,20 +49,54 @@ __all__ = [
     "load_studios_catalog",
     "remove_renamed",
     "run_preview",
+    "studios_catalog",
     "validate_basename",
 ]
 
 ProgressCallback = Callable[[ProgressEvent], None]
 
+# Кеш разобранного справочника: повторные запросы состояния не должны
+# перечитывать ~19 МБ JSON на каждое обновление индикаторов.
+_catalog_cache: tuple[tuple[str, int, int], tuple[dict[str, str], str]] | None = None
+
+
+def studios_catalog() -> tuple[dict[str, str], str]:
+    """Справочник студий и причина, по которой он пуст.
+
+    Второй элемент: `""` — файл прочитан (пустой словарь допустим),
+    `"missing"` — файла нет, `"unreadable: …"` — файл есть, но не читается
+    или повреждён. Ответ кешируется по пути, размеру и mtime: GUI и TUI
+    спрашивают состояние при обновлении индикаторов, а разбор большого
+    справочника занимает заметное время. Возвращённый словарь только для
+    чтения — его же получают и вызовы `build_service`.
+    """
+    global _catalog_cache
+    path = resolve_studios_path()
+    try:
+        info = path.stat()
+    except OSError:
+        _catalog_cache = None
+        return {}, "missing"
+    key = (os.fspath(path), info.st_mtime_ns, info.st_size)
+    if _catalog_cache is not None and _catalog_cache[0] == key:
+        return _catalog_cache[1]
+    try:
+        studios = load_studios(os.fspath(path))
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        result: tuple[dict[str, str], str] = ({}, f"unreadable: {exc}")
+    else:
+        result = (studios, "")
+    _catalog_cache = (key, result)
+    return result
+
 
 def load_studios_catalog() -> dict[str, str]:
-    """Справочник студий; нет файла или он битый — пустой справочник."""
-    if not STUDIOS_PATH.exists():
-        return {}
-    try:
-        return load_studios(str(STUDIOS_PATH))
-    except (OSError, ValueError, TypeError):
-        return {}
+    """Справочник студий; нет файла или он битый — пустой справочник.
+
+    Читается тот же файл, что найдёт сама программа: обновлённый пользователем
+    справочник, а если его нет — поставляемый в пакете.
+    """
+    return studios_catalog()[0]
 
 
 def load_performer_index() -> PerformerIndex | None:
@@ -90,6 +129,7 @@ def run_preview(
     folder: str | Path,
     *,
     api_key: str = "",
+    offline: bool = False,
     studios: dict[str, str] | None = None,
     performers: PerformerIndex | None = None,
     progress: ProgressCallback | None = None,
@@ -99,11 +139,13 @@ def run_preview(
 ) -> PreviewReport:
     """Строит preview в текущем потоке; кэш создаётся и закрывается здесь.
 
-    `service_callback` получает готовый сервис — интерфейс запоминает его,
-    чтобы потом собирать имена по альтернативным кандидатам.
+    `offline` — явный запрет сети; он не включается автоматически из-за
+    отсутствия ключа StashDB, иначе присутствующие ключи вторичных источников
+    молча переставали бы работать. `service_callback` получает готовый сервис —
+    интерфейс запоминает его, чтобы потом собирать имена по альтернативным
+    кандидатам.
     """
     key = (api_key or "").strip()
-    offline = not key
     cache = TitleCache(str(CACHE_PATH if cache_path is None else cache_path))
     client = StashDBClient(key) if key else None
     try:
@@ -114,7 +156,7 @@ def run_preview(
             client,
             offline=offline,
             progress=progress,
-            extra_clients=build_fingerprint_clients(os.environ, offline=offline),
+            extra_clients=build_fingerprint_clients(os.environ),
             performers=load_performer_index() if performers is None else performers,
             cancel_event=cancel_event,
         )
@@ -175,14 +217,32 @@ def apply_rows(
 ) -> tuple[ApplyReport, str]:
     """Переименовывает строки и пишет журнал.
 
-    Возвращает отчёт и текст ошибки журнала. Ошибка журнала не отменяет
-    переименование: файлы уже переименованы, пользователь видит предупреждение.
+    Возвращает отчёт и текст ошибки журнала. Если журнал нельзя дописать,
+    ни один файл не перемещается: все одобренные строки получают `error`
+    с причиной (проверка до изменения диска). Сбой записи уже после rename
+    по-прежнему не отменяет переименование.
     """
     root = str(root)
     if not root:
         raise ValueError("Не выбрана папка для переименования")
-    service = TitleService(root, {}, None, None)
-    report = service.apply_rows(list(rows), dry_run=False)
+    rows = list(rows)
+    approved = [row for row in rows if row.approved]
+    journal_problem = log_write_problem(log_path) if approved else ""
+    if journal_problem:
+        results = tuple(
+            ApplyResult(
+                row.old_rel,
+                row.new_rel,
+                "error",
+                f"journal is not writable: {journal_problem}",
+            )
+            if row.approved
+            else ApplyResult(row.old_rel, row.new_rel, "skipped", "not approved")
+            for row in rows
+        )
+        return ApplyReport(results=results, had_errors=True), ""
+    service = TitleService(root, {}, None)
+    report = service.apply_rows(rows, dry_run=False)
     log_error = ""
     if any(result.status == "renamed" for result in report.results):
         try:

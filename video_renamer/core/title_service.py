@@ -37,6 +37,7 @@ from video_renamer.core.fingerprint_sources import (
     PRIMARY_SOURCE_NAME,
     merge_scenes,
 )
+from video_renamer.core.fs_links import is_junction
 from video_renamer.core.oshash import OshashError, oshash_from_path
 from video_renamer.core.performer_names import PerformerIndex
 from video_renamer.core.phash import PhashError, format_phash, phash_from_path
@@ -206,6 +207,28 @@ def _path_key(path: str) -> str:
     return os.path.normcase(os.path.abspath(path))
 
 
+def _stat_file(path: str) -> os.stat_result | None:
+    """Версия файла для сверки с кэшем; `None`, если файл недоступен."""
+    try:
+        return os.stat(path)
+    except OSError:
+        return None
+
+
+def _file_id(stat_result: os.stat_result) -> int:
+    """Идентификатор файла, если ОС его сообщает (0 — неизвестно)."""
+    return int(getattr(stat_result, "st_ino", 0) or 0)
+
+
+def _same_version(before: os.stat_result, after: os.stat_result) -> bool:
+    """Не изменился ли файл между двумя `stat`."""
+    return (
+        before.st_size == after.st_size
+        and before.st_mtime_ns == after.st_mtime_ns
+        and _file_id(before) == _file_id(after)
+    )
+
+
 def _abspath_inside_root(path: str, root: str) -> bool:
     """Проверка containment без разрешения symlink (после `abspath`)."""
     try:
@@ -236,7 +259,7 @@ def _walk(
         try:
             if entry.is_symlink():
                 continue
-            if os.path.isjunction(entry.path):
+            if is_junction(entry.path):
                 continue
             if not _inside_root(entry.path, root_real):
                 continue
@@ -577,6 +600,10 @@ class TitleService:
             rollback_errors = self._rollback_apply_item(item, active, results, frozenset())
             if rollback_errors:
                 error += "; rollback failed: " + "; ".join(rollback_errors)
+            if item.temp_path is not None and os.path.lexists(item.temp_path):
+                # Файл остался под служебным именем: путь нужен, чтобы человек
+                # мог найти его и не искать вслепую по `__ren_tmp_*`.
+                error += f"; temporary file kept: {item.temp_path} (original: {item.row.old_rel})"
             results[item.index] = ApplyResult(item.row.old_rel, item.new_rel, "error", error)
 
         return self._apply_report(results)
@@ -625,7 +652,7 @@ class TitleService:
             return None, "old and new extensions differ"
 
         try:
-            if os.path.islink(old_path) or os.path.isjunction(old_path):
+            if os.path.islink(old_path) or is_junction(old_path):
                 return None, "old path must not be a symlink or junction"
             source_stat = os.lstat(old_path)
         except OSError as exc:
@@ -974,9 +1001,22 @@ class TitleService:
         return failures, transient
 
     def _local_phash(self, candidate: _Candidate) -> str:
-        """PHASH файла из локального кэша или вычисленный; `""` при ошибке файла."""
-        if self._cache is not None:
-            cached = self._cache.get_local_phash(candidate.oshash, candidate.size)
+        """PHASH файла из локального кэша или вычисленный; `""` при ошибке файла.
+
+        Кэш принимается, только если файл не изменился с момента сохранения:
+        сверяются размер, `mtime_ns` и file id (когда ОС его даёт). Пара
+        (OSHASH, размер) сама по себе идентичность не доказывает — правка в
+        середине файла при том же размере оставляет OSHASH прежним.
+        """
+        before = _stat_file(candidate.path)
+        cacheable = before is not None and before.st_size == candidate.size
+        if cacheable and self._cache is not None:
+            cached = self._cache.get_local_phash(
+                candidate.oshash,
+                candidate.size,
+                before.st_mtime_ns,
+                _file_id(before),
+            )
             if cached:
                 return cached
         try:
@@ -984,8 +1024,16 @@ class TitleService:
         except PhashError as exc:
             candidate.phash_error = str(exc) or exc.__class__.__name__
             return ""
-        if self._cache is not None:
-            self._cache.put_local_phash(candidate.oshash, candidate.size, value)
+        if cacheable and self._cache is not None:
+            after = _stat_file(candidate.path)
+            if after is not None and _same_version(before, after):
+                self._cache.put_local_phash(
+                    candidate.oshash,
+                    after.st_size,
+                    value,
+                    after.st_mtime_ns,
+                    _file_id(after),
+                )
         return value
 
     def _resolve_text(self, candidates: Sequence[_Candidate], warnings: list[str]) -> set[str]:

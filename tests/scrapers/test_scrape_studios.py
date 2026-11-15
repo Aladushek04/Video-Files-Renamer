@@ -1,6 +1,7 @@
 """Тесты скрапера студий: пагинация, resume, merge и CLI-коды возврата."""
 
 import json
+import os
 
 import pytest
 
@@ -319,15 +320,18 @@ def test_main_no_filter_keeps_generated_names(tmp_path, monkeypatch):
 
 def test_fansdb_source_parser_defaults():
     args = scrape_studios._build_parser(FANSDB_SOURCE).parse_args([])
-    assert args.out == "data/studios_fansdb.json"
-    assert args.checkpoint == "data/studios_fansdb_checkpoint.json"
-    assert args.raw == "data/studios_fansdb_raw.json"
+    assert args.out == FANSDB_SOURCE.default_out
+    assert args.checkpoint == FANSDB_SOURCE.default_checkpoint
+    assert args.raw == FANSDB_SOURCE.default_raw
+    assert os.path.isabs(args.out)
+    assert args.out.endswith("studios_fansdb.json")
 
 
 def test_theporndb_source_constants():
     assert THEPORNDB_SOURCE.endpoint == "https://theporndb.net/graphql"
     assert THEPORNDB_SOURCE.api_key_env == "THE_PORNDB_API_KEY"
-    assert THEPORNDB_SOURCE.default_out == "data/studios_theporndb.json"
+    assert THEPORNDB_SOURCE.default_out.endswith("studios_theporndb.json")
+    assert os.path.isabs(THEPORNDB_SOURCE.default_out)
 
 
 def test_main_uses_source_endpoint_and_key(tmp_path, monkeypatch):

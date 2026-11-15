@@ -17,6 +17,7 @@ import csv
 import glob
 import hashlib
 import os
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -28,6 +29,7 @@ __all__ = [
     "append_log",
     "entry_id",
     "format_log_timestamp",
+    "log_write_problem",
     "read_log",
 ]
 
@@ -47,6 +49,12 @@ LEGACY_FIELDS = ("timestamp", "old", "new", "oshash", "scene_id", "source")
 ACTION_RENAME = "rename"
 ACTION_UNDO = "undo"
 _FORMULA_PREFIXES = ("=", "+", "-", "@")
+# Что Excel и LibreOffice срезают перед разбором ячейки. Если после этого
+# остаётся формульный символ, ячейка опасна.
+_SPREADSHEET_WHITESPACE = " \t\r\n\v\f"
+# Эти символы в начале ячейки опасны и сами по себе: ими обходят проверку
+# первого символа.
+_CONTROL_PREFIXES = ("\t", "\r", "\n")
 _TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
 
 
@@ -75,15 +83,29 @@ class LogEntry:
         return entry_id(self.timestamp, self.action, self.root, self.old, self.new)
 
 
-def _guard_formula(value: str) -> str:
-    """Экранирует значение, которое Excel принял бы за формулу.
+def _needs_formula_guard(value: str) -> bool:
+    """Примет ли таблица значение за формулу.
 
-    Если значение уже начинается с апострофа, за которым идёт формульный
-    префикс, добавляется ещё один апостроф: так настоящий апостроф в имени
+    Excel и LibreOffice считают формулой ячейку, которая начинается с `=`, `+`,
+    `-` или `@`, в том числе после ведущих пробелов, табуляции и переводов
+    строки. Табуляция и CR/LF в начале ячейки опасны и сами по себе: их
+    используют, чтобы обойти проверку первого символа.
+    """
+    if value[:1] in _CONTROL_PREFIXES:
+        return True
+    stripped = value.lstrip(_SPREADSHEET_WHITESPACE)
+    return stripped[:1] in _FORMULA_PREFIXES
+
+
+def _guard_formula(value: str) -> str:
+    """Делает ячейку текстовой для электронной таблицы; операция обратима.
+
+    Если значение уже начинается с апострофа, за которым идёт формульное
+    значение, добавляется ещё один апостроф: так настоящий апостроф в имени
     не путается с защитным.
     """
-    if value.startswith(_FORMULA_PREFIXES) or (
-        value.startswith("'") and value.lstrip("'").startswith(_FORMULA_PREFIXES)
+    if _needs_formula_guard(value) or (
+        value.startswith("'") and _needs_formula_guard(value.lstrip("'"))
     ):
         return "'" + value
     return value
@@ -91,7 +113,9 @@ def _guard_formula(value: str) -> str:
 
 def _unguard_formula(value: str) -> str:
     """Снимает ровно один защитный апостроф, добавленный `_guard_formula`."""
-    if value.startswith("'") and value.lstrip("'").startswith(_FORMULA_PREFIXES):
+    if value.startswith("'") and (
+        _needs_formula_guard(value[1:]) or _needs_formula_guard(value.lstrip("'"))
+    ):
         return value[1:]
     return value
 
@@ -154,10 +178,10 @@ def _read_file(path: str) -> list[LogEntry]:
                         root="",
                         old=_unguard_formula(data.get("old", "")),
                         new=_unguard_formula(data.get("new", "")),
-                        oshash=data.get("oshash", ""),
+                        oshash=_unguard_formula(data.get("oshash", "")),
                         size=None,
-                        scene_id=data.get("scene_id", ""),
-                        source=data.get("source", ""),
+                        scene_id=_unguard_formula(data.get("scene_id", "")),
+                        source=_unguard_formula(data.get("source", "")),
                         legacy=True,
                     )
                 )
@@ -167,13 +191,13 @@ def _read_file(path: str) -> list[LogEntry]:
                         timestamp=data.get("timestamp", ""),
                         action=data.get("action", "") or ACTION_RENAME,
                         undoes=data.get("undoes", ""),
-                        root=data.get("root", ""),
+                        root=_unguard_formula(data.get("root", "")),
                         old=_unguard_formula(data.get("old", "")),
                         new=_unguard_formula(data.get("new", "")),
-                        oshash=data.get("oshash", ""),
+                        oshash=_unguard_formula(data.get("oshash", "")),
                         size=_parse_size(data.get("size", "")),
-                        scene_id=data.get("scene_id", ""),
-                        source=data.get("source", ""),
+                        scene_id=_unguard_formula(data.get("scene_id", "")),
+                        source=_unguard_formula(data.get("source", "")),
                         legacy=False,
                     )
                 )
@@ -239,6 +263,33 @@ def _migrate_legacy(path: str) -> None:
         raise LogMigrationError(f"cannot move legacy rename log {path} to {target}: {exc}") from exc
 
 
+def log_write_problem(path: str | os.PathLike[str]) -> str:
+    """Можно ли дописать журнал; пустая строка — можно.
+
+    Проверка выполняется до изменения файлов на диске: при сбое подготовки
+    журнала переименования не начинаются. Это не заменяет запись намерения до
+    rename — при аварийном завершении или полном диске всё равно нужна
+    восстановимая запись состояния — но убирает частый случай «файлы
+    переименованы, истории нет».
+    """
+    target = os.path.abspath(os.fspath(path))
+    parent = os.path.dirname(target)
+    try:
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        if os.path.isfile(target):
+            descriptor = os.open(target, os.O_WRONLY | os.O_APPEND)
+            os.close(descriptor)
+        probe_descriptor, probe_path = tempfile.mkstemp(
+            prefix=".renamer-journal-", dir=parent or "."
+        )
+        os.close(probe_descriptor)
+        os.unlink(probe_path)
+    except OSError as exc:
+        return str(exc) or exc.__class__.__name__
+    return ""
+
+
 def append_log(path: str, entries: Sequence[LogEntry]) -> None:
     """Дописывает строки в журнал нового формата.
 
@@ -263,12 +314,12 @@ def append_log(path: str, entries: Sequence[LogEntry]) -> None:
                     entry.timestamp,
                     entry.action,
                     entry.undoes,
-                    entry.root,
+                    _guard_formula(entry.root),
                     _guard_formula(entry.old),
                     _guard_formula(entry.new),
-                    entry.oshash,
+                    _guard_formula(entry.oshash),
                     "" if entry.size is None else str(entry.size),
-                    entry.scene_id,
-                    entry.source,
+                    _guard_formula(entry.scene_id),
+                    _guard_formula(entry.source),
                 )
             )

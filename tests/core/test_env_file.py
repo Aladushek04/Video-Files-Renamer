@@ -105,3 +105,128 @@ def test_scraper_main_reads_api_key_from_dotenv(tmp_path, monkeypatch):
     assert code == 0
     assert seen["api_key"] == "abc123"
     assert "LoadedFromEnv" in (tmp_path / "studios.json").read_text(encoding="utf-8")
+
+
+import pytest
+
+from video_renamer.core.env_file import reset_tracking
+
+
+@pytest.fixture(autouse=True)
+def _fresh_tracking():
+    reset_tracking()
+    yield
+    reset_tracking()
+
+
+def test_reload_updates_value_loaded_by_app(tmp_path, monkeypatch):
+    monkeypatch.delenv("RELOAD_ME", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("RELOAD_ME=first-test-key\n", encoding="utf-8")
+    load_env_file(env)
+    assert os.environ["RELOAD_ME"] == "first-test-key"
+
+    env.write_text("RELOAD_ME=second-test-key\n", encoding="utf-8")
+    load_env_file(env)
+
+    assert os.environ["RELOAD_ME"] == "second-test-key"
+
+
+def test_removed_line_clears_value_loaded_by_app(tmp_path, monkeypatch):
+    monkeypatch.delenv("KEEP_LINE", raising=False)
+    monkeypatch.delenv("DROP_LINE", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("KEEP_LINE=one\nDROP_LINE=two\n", encoding="utf-8")
+    load_env_file(env)
+
+    env.write_text("KEEP_LINE=one\n", encoding="utf-8")
+    load_env_file(env)
+
+    assert os.environ["KEEP_LINE"] == "one"
+    assert "DROP_LINE" not in os.environ
+
+
+def test_removed_file_clears_value_loaded_by_app(tmp_path, monkeypatch):
+    monkeypatch.delenv("FILE_KEY", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("FILE_KEY=value\n", encoding="utf-8")
+    load_env_file(env)
+    env.unlink()
+
+    load_env_file(env)
+
+    assert "FILE_KEY" not in os.environ
+
+
+def test_external_value_wins_and_survives_reload(tmp_path, monkeypatch):
+    monkeypatch.setenv("EXTERNAL_KEY", "from-process")
+    env = tmp_path / ".env"
+    env.write_text("EXTERNAL_KEY=from-file-v1\n", encoding="utf-8")
+    load_env_file(env)
+    assert os.environ["EXTERNAL_KEY"] == "from-process"
+
+    env.write_text("EXTERNAL_KEY=from-file-v2\n", encoding="utf-8")
+    load_env_file(env)
+
+    assert os.environ["EXTERNAL_KEY"] == "from-process"
+
+
+def test_value_changed_after_load_is_not_overwritten_or_deleted(tmp_path, monkeypatch):
+    monkeypatch.delenv("TAKE_OVER", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("TAKE_OVER=from-file\n", encoding="utf-8")
+    load_env_file(env)
+    monkeypatch.setenv("TAKE_OVER", "manual")
+
+    env.write_text("TAKE_OVER=from-file-v2\n", encoding="utf-8")
+    load_env_file(env)
+    assert os.environ["TAKE_OVER"] == "manual"
+
+    env.write_text("OTHER=value\n", encoding="utf-8")
+    load_env_file(env)
+    assert os.environ["TAKE_OVER"] == "manual"
+
+
+def test_override_replaces_external_value(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORCED", "external")
+    env = tmp_path / ".env"
+    env.write_text("FORCED=file\n", encoding="utf-8")
+
+    load_env_file(env, override=True)
+
+    assert os.environ["FORCED"] == "file"
+
+
+def test_tracking_is_per_mapping(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("SCOPED=one\n", encoding="utf-8")
+    custom: dict[str, str] = {}
+
+    load_env_file(env, environ=custom)
+    env.write_text("SCOPED=two\n", encoding="utf-8")
+    load_env_file(env, environ=custom)
+
+    assert custom == {"SCOPED": "two"}
+    assert "SCOPED" not in os.environ
+
+
+def test_project_env_follows_cwd_and_clears_removed_file(tmp_path, monkeypatch):
+    from video_renamer import paths
+
+    project = tmp_path / "project"
+    user = tmp_path / "user"
+    work = tmp_path / "work"
+    for folder in (project, user, work):
+        folder.mkdir()
+    monkeypatch.setattr(paths, "PROJECT_ROOT", project)
+    monkeypatch.setattr(paths, "USER_ROOT", user)
+    monkeypatch.chdir(work)
+    monkeypatch.delenv("CWD_KEY", raising=False)
+    (work / ".env").write_text("CWD_KEY=one\n", encoding="utf-8")
+
+    paths.load_project_env()
+    assert os.environ["CWD_KEY"] == "one"
+
+    (work / ".env").unlink()
+    paths.load_project_env()
+    assert "CWD_KEY" not in os.environ

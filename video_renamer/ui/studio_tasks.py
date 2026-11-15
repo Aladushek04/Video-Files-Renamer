@@ -2,6 +2,12 @@
 
 Операции запускаются отдельными процессами: так их можно отменить из TUI,
 не убивая сам интерфейс. Вывод читается построчно и отдаётся в журнал.
+
+Корень проекта берётся из `video_renamer.paths`, а не из расположения этого
+файла: `Path(__file__).parent.parent` указывал на сам пакет `video_renamer`,
+поэтому дочерние процессы запускались в `video_renamer/` и искали данные в
+`video_renamer/data/`. Пути передаются абсолютными, чтобы результат не
+зависел от текущего каталога вызывающего процесса.
 """
 
 from __future__ import annotations
@@ -14,37 +20,61 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
+from video_renamer import paths
+
 __all__ = ["run"]
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-MERGE_INPUTS = (
-    "data/studios.json",
-    "data/studios_fansdb.json",
-    "data/studios_theporndb.json",
+PROJECT_ROOT = paths.PROJECT_ROOT
+USER_ROOT = paths.USER_ROOT
+DATA_DIR = paths.DATA_DIR
+MERGE_INPUT_NAMES = (
+    "studios.json",
+    "studios_fansdb.json",
+    "studios_theporndb.json",
 )
 CANCELLED_CODE = 130
+
+
+def _merge_inputs() -> tuple[Path, ...]:
+    """Входные файлы merge как абсолютные пути.
+
+    База — тот же справочник, что читает приложение: обновлённый пользователем
+    или поставляемый в пакете. Так первый запуск в установленном wheel не
+    теряет поставленный справочник.
+    """
+    user_catalog = DATA_DIR / MERGE_INPUT_NAMES[0]
+    base = user_catalog if user_catalog.is_file() else paths.PACKAGED_STUDIOS_PATH
+    return (base, *(DATA_DIR / name for name in MERGE_INPUT_NAMES[1:]))
 
 
 def _command(kind: str) -> list[str]:
     """Команда процесса для вида операции."""
     python = sys.executable
-    if kind == "stashdb":
-        return [python, "-m", "video_renamer.scrapers.stashdb", "--apply"]
-    if kind == "fansdb":
-        return [python, "-m", "video_renamer.scrapers.fansdb", "--apply"]
-    if kind == "theporndb":
-        return [python, "-m", "video_renamer.scrapers.theporndb", "--apply"]
+    if kind in {"stashdb", "fansdb", "theporndb"}:
+        return [python, "-m", f"video_renamer.scrapers.{kind}", "--apply"]
     if kind == "merge":
         return [
             python,
             "-m",
             "video_renamer.scrapers.merge_studios",
-            *MERGE_INPUTS,
+            *(str(path) for path in _merge_inputs()),
             "--out",
-            "data/studios.json",
+            str(DATA_DIR / "studios.json"),
             "--apply",
         ]
     raise ValueError(f"unknown studio task: {kind}")
+
+
+def _child_env() -> dict[str, str]:
+    """Окружение дочернего процесса: UTF-8 и импорт пакета из этого дерева."""
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    root = str(PROJECT_ROOT)
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = root if not existing else root + os.pathsep + existing
+    return env
 
 
 def _terminate(process: subprocess.Popen[str]) -> int:
@@ -69,27 +99,26 @@ def run(
 
     command = _command(kind)
     line_callback = on_line or (lambda _line: None)
-    env = os.environ.copy()
-    env["PYTHONUNBUFFERED"] = "1"
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["PYTHONUTF8"] = "1"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     process = subprocess.Popen(
         command,
-        cwd=str(PROJECT_ROOT),
+        cwd=str(USER_ROOT),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
         errors="replace",
         bufsize=1,
-        env=env,
+        env=_child_env(),
     )
     lines: queue.Queue[str | None] = queue.Queue()
+    if process.stdout is None:  # stdout=PIPE всегда даёт поток
+        _terminate(process)
+        raise RuntimeError("studio task started without a stdout pipe")
 
     def read_output() -> None:
         try:
-            assert process.stdout is not None
             for line in process.stdout:
                 lines.put(line.rstrip("\n"))
         finally:

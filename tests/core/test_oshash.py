@@ -75,3 +75,50 @@ def test_oshash_accepts_str_path(tmp_path):
 def test_oshash_missing_file_raises_oserror(tmp_path):
     with pytest.raises(OSError):
         oshash_from_path(tmp_path / "nope.bin")
+
+
+def test_middle_of_file_is_not_part_of_the_fingerprint(tmp_path):
+    """OSHASH покрывает размер и края файла, но не всё содержимое."""
+    payload = bytearray(b"\x01" * (CHUNK_SIZE * 3))
+    p = tmp_path / "video.bin"
+    p.write_bytes(bytes(payload))
+    before = oshash_from_path(p)
+
+    payload[CHUNK_SIZE + 5] = 0x7F
+    p.write_bytes(bytes(payload))
+
+    assert oshash_from_path(p) == before
+
+
+def test_head_change_changes_the_fingerprint(tmp_path):
+    payload = bytearray(b"\x01" * (CHUNK_SIZE * 3))
+    p = tmp_path / "video.bin"
+    p.write_bytes(bytes(payload))
+    before = oshash_from_path(p)
+
+    payload[10] ^= 0xFF
+    p.write_bytes(bytes(payload))
+
+    assert oshash_from_path(p) != before
+
+
+def test_tail_change_changes_the_fingerprint(tmp_path):
+    payload = bytearray(b"\x01" * (CHUNK_SIZE * 3))
+    p = tmp_path / "video.bin"
+    p.write_bytes(bytes(payload))
+    before = oshash_from_path(p)
+
+    payload[-10] ^= 0xFF
+    p.write_bytes(bytes(payload))
+
+    assert oshash_from_path(p) != before
+
+
+def test_size_is_part_of_the_fingerprint(tmp_path):
+    p = tmp_path / "video.bin"
+    p.write_bytes(b"\x01" * (CHUNK_SIZE * 3))
+    before = oshash_from_path(p)
+
+    p.write_bytes(b"\x01" * (CHUNK_SIZE * 3 + 8))
+
+    assert oshash_from_path(p) != before

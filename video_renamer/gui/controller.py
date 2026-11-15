@@ -21,9 +21,9 @@ from video_renamer.core.review_actions import (
     basename_new_rel,
     build_service,
     load_performer_index,
-    load_studios_catalog,
     remove_renamed,
     run_preview,
+    studios_catalog,
     validate_basename,
 )
 from video_renamer.core.stashdb_client import Scene
@@ -34,7 +34,7 @@ from video_renamer.core.title_service import (
     ProgressEvent,
     TitleService,
 )
-from video_renamer.paths import LOG_PATH, STUDIOS_PATH, load_project_env
+from video_renamer.paths import LOG_PATH, load_project_env, resolve_studios_path
 from video_renamer.ui.tui_model import ReviewModel
 
 PreviewFactory = Callable[[str, Callable[[ProgressEvent], None]], PreviewReport]
@@ -58,8 +58,10 @@ class RenamerController:
         self._apply_factory = apply_factory
         self._service: TitleService | None = None
         self.log_path = log_path or str(LOG_PATH)
+        self._preview_root = ""
         self.keys: dict[str, bool] = {}
         self.studios: dict[str, str] = {}
+        self.studios_problem = ""
         self.performers: PerformerIndex | None = None
         self.reload_environment()
         if folder:
@@ -74,7 +76,7 @@ class RenamerController:
             source.name: bool((os.environ.get(source.api_key_env) or "").strip())
             for source in FINGERPRINT_SOURCES
         }
-        self.studios = load_studios_catalog()
+        self.studios, self.studios_problem = studios_catalog()
         self.performers = load_performer_index()
         self._service = None
 
@@ -84,34 +86,65 @@ class RenamerController:
 
     @property
     def offline(self) -> bool:
+        """Нет ключа StashDB: его поиск недоступен, вторичные — по своим ключам."""
         return not bool(self.stashdb_key)
 
     def source_configured(self, name: str) -> bool:
         return bool(self.keys.get(name))
 
     def catalog_text(self) -> str:
-        if not STUDIOS_PATH.exists():
-            return "Справочник: studios.json не найден"
+        """Состояние справочника: размер, отсутствие или повреждение — различимо."""
+        if self.studios_problem == "missing":
+            return "Справочник: studios.json не найден — поиск студий отключён"
+        if self.studios_problem:
+            reason = self.studios_problem.removeprefix("unreadable: ").strip()
+            return f"Справочник повреждён: {reason[:80]} — поиск студий отключён"
+        path = resolve_studios_path()
         try:
-            size = STUDIOS_PATH.stat().st_size / (1024 * 1024)
+            size = path.stat().st_size / (1024 * 1024)
         except OSError:
             return "Справочник: размер недоступен"
         return f"Справочник: {size:.1f} MB"
 
     # --- папка и preview -------------------------------------------------
 
-    def set_folder(self, folder: str) -> Path:
-        """Проверяет и запоминает папку; исключение — для показа пользователю."""
-        folder = folder.strip().strip('"')
+    def resolve_folder(self, folder: str) -> Path:
+        """Проверяет папку, не меняя выбранный корень и текущее ревью."""
+        folder = (folder or "").strip().strip('"')
         if not folder:
             raise ValueError("Выберите папку с видео")
         path = Path(folder).expanduser()
         if not path.is_dir():
             raise ValueError(f"Папка не найдена: {path}")
+        return path
+
+    def set_folder(self, folder: str) -> Path:
+        """Запоминает папку для следующего preview; строки не перепривязываются."""
+        path = self.resolve_folder(folder)
         self.folder = path
-        self.model.folder = str(path)
         self._service = None
         return path
+
+    @property
+    def review_root(self) -> str:
+        """Корень, для которого получены строки текущего ревью."""
+        return self.model.folder
+
+    @property
+    def review_stale(self) -> bool:
+        """Строки есть, но выбрана другая папка — применять их нельзя."""
+        if self.folder is None or not self.model.rows:
+            return False
+        return not self.model.is_for(str(self.folder))
+
+    def folder_change_needs_confirmation(self, folder: str | Path) -> bool:
+        """Нужно ли подтверждение: в таблице строки другого корня."""
+        return bool(self.model.rows) and not self.model.is_for(str(folder))
+
+    def discard_review(self) -> None:
+        """Сбрасывает строки и привязку к корню после подтверждения."""
+        self.model.reset_review()
+        self._service = None
 
     def run_preview(
         self,
@@ -123,6 +156,7 @@ class RenamerController:
         if self.folder is None:
             raise ValueError("Сначала выберите папку")
         folder = str(self.folder)
+        self._preview_root = folder
         if self._preview_factory is not None:
             return self._preview_factory(folder, progress)
 
@@ -139,9 +173,16 @@ class RenamerController:
     def _remember_service(self, service: TitleService) -> None:
         self._service = service
 
-    def apply_preview(self, report: PreviewReport) -> None:
-        """Публикует готовый отчёт в модели; вызывать в главном потоке."""
-        self.model = ReviewModel(str(self.folder) if self.folder else "", list(report.rows))
+    def apply_preview(self, report: PreviewReport, *, root: str | None = None) -> None:
+        """Публикует отчёт и привязывает строки к корню, для которого он получен.
+
+        `root` — папка, фактически просканированная preview; по умолчанию —
+        последний запущенный `run_preview`, и только затем текущая папка.
+        """
+        review_root = (
+            root or self._preview_root or (str(self.folder) if self.folder else "")
+        ).strip()
+        self.model = ReviewModel(review_root, list(report.rows))
 
     # --- ревью -----------------------------------------------------------
 
@@ -172,7 +213,7 @@ class RenamerController:
     def _get_service(self) -> TitleService:
         if self._service is not None:
             return self._service
-        folder = str(self.folder) if self.folder else self.model.folder
+        folder = self.model.folder or (str(self.folder) if self.folder else "")
         self._service = build_service(
             folder,
             studios=self.studios,
@@ -186,11 +227,15 @@ class RenamerController:
     # --- apply -----------------------------------------------------------
 
     def run_apply(self, rows: list[PreviewRow]) -> tuple[ApplyReport, str]:
-        """Переименовывает строки; сбой журнала не отменяет сам apply."""
+        """Переименовывает строки в корне ревью; сбой журнала не отменяет apply."""
+        root = self.model.folder
+        if not root:
+            raise ValueError("Ревью не привязано к папке: выполните Preview")
+        if self.review_stale:
+            raise ValueError("Папка изменилась после Preview: выполните Preview заново")
         if self._apply_factory is not None:
             return self._apply_factory(rows), ""
 
-        root = self.model.folder or (str(self.folder) if self.folder else "")
         return apply_rows(root, rows, log_path=self.log_path)
 
     def remove_renamed(self, report: ApplyReport) -> None:

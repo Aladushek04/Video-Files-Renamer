@@ -47,19 +47,17 @@ def test_fingerprint_sources_key_env_names_match_scrapers():
 
 
 def test_missing_secondary_key_is_skipped():
-    clients = build_fingerprint_clients({"THE_PORNDB_API_KEY": ""}, offline=False)
+    clients = build_fingerprint_clients({"THE_PORNDB_API_KEY": ""})
     assert "ThePornDB" not in clients
 
 
 def test_secondary_clients_built_when_keys_present():
-    clients = build_fingerprint_clients(
-        {"THE_PORNDB_API_KEY": "t", "FANSDB_API_KEY": "f"}, offline=False
-    )
+    clients = build_fingerprint_clients({"THE_PORNDB_API_KEY": "t", "FANSDB_API_KEY": "f"})
     assert set(clients) == {"ThePornDB", "FansDB"}
 
 
 def test_offline_keeps_clients_so_cache_can_be_read():
-    clients = build_fingerprint_clients({"FANSDB_API_KEY": "f"}, offline=True)
+    clients = build_fingerprint_clients({"FANSDB_API_KEY": "f"})
     assert set(clients) == {"FansDB"}
 
 

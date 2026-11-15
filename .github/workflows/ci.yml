@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Единая кодировка консоли: CLI и тесты печатают русский текст.
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+
+jobs:
+  lint:
+    name: Ruff
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install ruff
+        run: python -m pip install "ruff>=0.17"
+      - name: Check
+        run: python -m ruff check .
+      - name: Check formatting
+        run: python -m ruff format --check .
+      - name: Ensure secrets are not committed
+        shell: pwsh
+        run: |
+          if (Test-Path .env) { throw ".env must not be committed" }
+          $tracked = git ls-files ".env"
+          if ($tracked) { throw ".env is tracked by git: $tracked" }
+
+  test:
+    name: Python ${{ matrix.python }}
+    runs-on: windows-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package with optional UI dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,tui,gui]"
+
+      # Сборка колеса и установка в чистый venv проверяются отдельным заданием:
+      # в матрице это дублировалось бы на каждой версии Python.
+      - name: Unit, CLI, GUI and TUI tests
+        run: python -m pytest --deselect tests/test_wheel_install.py
+
+  wheel:
+    name: Wheel and clean install
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install build tools and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "build"
+
+      # Тест сам собирает wheel, ставит его в отдельный venv и проверяет
+      # ресурсы, пути пользовательских данных и запуск вне репозитория.
+      - name: Wheel, sdist and installed package
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pytest tests/test_wheel_install.py
+
+      # Установка не из репозитория: пакет берётся из wheel, команда
+      # выполняется в постороннем каталоге.
+      - name: CLI smoke test from the installed package
+        run: |
+          python -m pip install . --force-reinstall --no-deps
+          $smoke = Join-Path $env:RUNNER_TEMP "vfr-smoke"
+          New-Item -ItemType Directory -Path $smoke -Force | Out-Null
+          Push-Location $smoke
+          try {
+            python -m video_renamer.cli preview . --offline --csv preview.csv
+            if (-not (Test-Path "preview.csv")) {
+              throw "preview.csv was not created"
+            }
+          }
+          finally {
+            Pop-Location
+          }

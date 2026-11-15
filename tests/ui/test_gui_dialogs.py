@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-pytest.importorskip("customtkinter")
+ctk = pytest.importorskip("customtkinter")
 
 from video_renamer.core.rename_log import ACTION_RENAME, LogEntry
 from video_renamer.gui import dialogs
@@ -248,6 +248,39 @@ def test_load_failure_is_shown_in_red(
         assert text.startswith("Не удалось прочитать журнал")
         assert "disk unreadable" in text
         assert dialog.status_label.cget("text_color") == COLORS["red_text"]
+    finally:
+        dialog.destroy()
+
+
+def test_confirm_dialog_fits_a_long_apply_message(ctk_root, monkeypatch):
+    """Длинный Unicode-путь и примеры не обрезаются в диалоге 620×440."""
+    for method in ("grab_set", "lift", "focus_force"):
+        monkeypatch.setattr(dialogs.ConfirmDialog, method, lambda self, *args, **kwargs: None)
+    message = (
+        "Папка:\nC:\\Видео\\Очень длинная папка — 日本語 — " + "x" * 180 + "\n\n"
+        "Будет переименовано: 40 из 40\nFingerprint: 40\n\n"
+        "Примеры:\n"
+        + "\n".join(
+            f"{'old-name-' * 8}{index}.mp4 → {'New Name ' * 4}{index}.mp4" for index in range(3)
+        )
+        + "\n\nЖурнал: C:\\logs\\rename_log.csv\n"
+        "Операция сразу изменяет файлы на диске. Откат — через журнал, если он записан."
+    )
+    dialog = dialogs.ConfirmDialog(
+        ctk_root,
+        title="Применить переименования?",
+        message=message,
+        width=620,
+        height=440,
+    )
+    try:
+        dialog.geometry("620x440+4000+4000")
+        dialog.deiconify()
+        dialog.update()
+        labels = [widget for widget in dialog.winfo_children() if isinstance(widget, ctk.CTkLabel)]
+        body = max(labels, key=lambda widget: widget.winfo_reqheight())
+        assert body.cget("text") == message
+        assert body.winfo_reqheight() <= body.winfo_height()
     finally:
         dialog.destroy()
 

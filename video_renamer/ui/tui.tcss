@@ -72,13 +72,18 @@ Footer {
 }
 
 #filter {
-    width: 24;
+    width: 18;
+    height: 3;
     background: #111c33;
     border: tall #1e3a5f;
 }
 
 #toolbar Button {
     margin-left: 1;
+    /* На 140 колонках стандартные 16 ячеек на кнопку не помещаются. */
+    min-width: 0;
+    width: auto;
+    padding: 0 1;
 }
 
 DataTable {
@@ -174,6 +179,7 @@ ModalScreen {
 #candidate-dialog,
 #name-dialog,
 #studio-dialog,
+#folder-dialog,
 #quit-dialog {
     width: 72;
     height: 80%;
@@ -185,6 +191,7 @@ ModalScreen {
 #confirm-dialog,
 #name-dialog,
 #result-dialog,
+#folder-dialog,
 #quit-dialog {
     height: auto;
 }
