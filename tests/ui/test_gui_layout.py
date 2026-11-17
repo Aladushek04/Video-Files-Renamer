@@ -117,10 +117,7 @@ def test_recommended_size_shows_everything_without_scrolling(gui):
     if gui.winfo_width() < RECOMMENDED_SIZE[0] or gui.winfo_height() < RECOMMENDED_SIZE[1]:
         # Виртуальный экран CI часто меньше 1440×900; Tk урезает окно,
         # и проверка «всё без прокрутки» относится уже к другому размеру.
-        pytest.skip(
-            "экран меньше рекомендованного окна: "
-            f"{gui.winfo_width()}x{gui.winfo_height()}"
-        )
+        pytest.skip(f"экран меньше рекомендованного окна: {gui.winfo_width()}x{gui.winfo_height()}")
     canvas = gui.sidebar_body._parent_canvas
 
     assert (
