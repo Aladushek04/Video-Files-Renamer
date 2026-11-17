@@ -436,23 +436,26 @@ class RenamerGUI(ctk.CTk):
         )
         self.header.grid(row=2, column=0, sticky="ew", padx=(16, 30), pady=(0, 4))
         configure_row_columns(self.header)
+        self.header_labels: list[ctk.CTkLabel] = []
         for column, text in enumerate(
             ("", "ОРИГИНАЛЬНОЕ ИМЯ", "КАНДИДАТЫ", "НОВОЕ ИМЯ", "ИСТОЧНИК", "CONF")
         ):
             anchor = "e" if column == 5 else "w"
-            ctk.CTkLabel(
+            label = ctk.CTkLabel(
                 self.header,
                 text=text,
                 anchor=anchor,
                 font=font(10, "bold"),
                 text_color=COLORS["muted"],
-            ).grid(
+            )
+            label.grid(
                 row=0,
                 column=column,
                 padx=(10 if column == 0 else 4, 10 if column == 5 else 4),
                 pady=6,
                 sticky="ew",
             )
+            self.header_labels.append(label)
 
         self.rows_view = VirtualRowsView(
             self.main,
@@ -678,10 +681,13 @@ class RenamerGUI(ctk.CTk):
         self.selected_index = None
         self._set_busy(False)
         self._refresh_rows(reset_scroll=True)
-        self._set_status(
-            f"Готово: {len(report.rows)} строк. Проверьте таблицу и нажмите «Применить».",
-            "ok",
-        )
+        if report.rows and not self.controller.model.approved_rows():
+            self._set_status("Отметьте строки для переименования", "warn")
+        else:
+            self._set_status(
+                f"Готово: {len(report.rows)} строк. Проверьте таблицу и нажмите «Применить».",
+                "ok",
+            )
         if report.warnings:
             show_notice(
                 self,
@@ -715,7 +721,7 @@ class RenamerGUI(ctk.CTk):
             return
         approved = self.controller.model.approved_rows()
         if not approved:
-            self._set_status("Нет одобренных строк", "warn")
+            self._set_status("Отметьте строки для переименования", "warn")
             return
         if not self.controller.model.folder or self.controller.review_stale:
             self._set_status("Папка изменилась после Preview: выполните Preview заново", "warn")
@@ -784,12 +790,14 @@ class RenamerGUI(ctk.CTk):
             )
         else:
             self._set_status(f"Применено: {renamed}", "ok")
-        show_apply_result(
+        open_journal = show_apply_result(
             self,
             report,
             log_path=self.controller.log_path,
             log_error=log_error,
         )
+        if open_journal:
+            self.open_undo()
 
     def _apply_failed(self, exc: Exception) -> None:
         self._set_busy(False)
@@ -980,6 +988,13 @@ class RenamerGUI(ctk.CTk):
         ):
             self.selected_index = None
         self.rows_view.set_rows(visible, reset_scroll=reset_scroll)
+        if not visible and self.controller.model.rows and self.controller.model.filter != "all":
+            self.rows_view.show_empty_message(
+                "Нет строк по этому фильтру",
+                "Измените фильтр или сбросьте его, чтобы вернуть все предложения.",
+                action_text="Сбросить фильтр",
+                action=self._reset_filter,
+            )
         self.rows_view.set_selected_index(self.selected_index)
         self.visible_label.configure(text=f"{self._visible_total} строк")
         self._update_stats()
@@ -1090,6 +1105,12 @@ class RenamerGUI(ctk.CTk):
         key = self._filter_by_label.get(label, "all")
         self.controller.model.filter = key
         self._refresh_rows(reset_scroll=True)
+
+    def _reset_filter(self) -> None:
+        label = dict(FILTERS).get("all", "Все")
+        self.filter_menu.set(label)
+        self._on_filter_changed(label)
+        self._set_status("Фильтр сброшен", "info")
 
     # --- диалоги ---------------------------------------------------------
 

@@ -169,3 +169,59 @@ def test_apply_status_counts_only_failed_rows(gui, tmp_path, monkeypatch):
     # Неодобренная строка осталась в модели, но ошибкой не считается.
     assert len(gui.controller.model.rows) == 2
     assert gui.status_label.cget("text") == "Применено: 0; строк с ошибками: 1"
+
+
+def pending_row(old_rel: str = "original.mp4") -> PreviewRow:
+    return PreviewRow(False, old_rel, "changed.mp4", "text", 0.9, "s1", "", "h1", 10, ())
+
+
+def test_preview_without_approvals_asks_to_mark_rows(gui, tmp_path):
+    folder = tmp_path / "A"
+    folder.mkdir()
+    gui.controller.set_folder(str(folder))
+
+    gui._preview_done(PreviewReport((pending_row(),), (), False))
+
+    assert gui.status_label.cget("text") == "Отметьте строки для переименования"
+
+
+def test_apply_without_approvals_asks_to_mark_rows(gui):
+    gui.action_apply()
+
+    assert gui.status_label.cget("text") == "Отметьте строки для переименования"
+
+
+def test_filter_without_matches_shows_message_and_resets(gui, tmp_path):
+    folder = tmp_path / "A"
+    folder.mkdir()
+    gui.controller.set_folder(str(folder))
+    gui.controller.apply_preview(PreviewReport((pending_row(),), (), False))
+    gui._refresh_rows(reset_scroll=True)
+
+    gui._on_filter_changed("Эвристика")
+
+    assert gui.controller.model.filter == "heuristic"
+    assert gui.rows_view.empty_title.cget("text") == "Нет строк по этому фильтру"
+    assert gui.rows_view.empty_button.cget("text") == "Сбросить фильтр"
+    assert gui.rows_view.empty_button.winfo_manager() == "pack"
+    assert gui.rows_view._empty_frame.winfo_manager() == "place"
+
+    gui.rows_view.empty_button.invoke()
+
+    assert gui.controller.model.filter == "all"
+    assert gui.filter_menu.get() == "Все"
+    assert gui.rows_view.views(), "строки должны вернуться после сброса фильтра"
+    assert gui.rows_view._empty_frame.winfo_manager() == ""
+
+
+def test_apply_result_can_open_builtin_journal(gui, tmp_path, monkeypatch):
+    folder = tmp_path / "A"
+    folder.mkdir()
+    gui.controller.set_folder(str(folder))
+    monkeypatch.setattr(gui_app, "show_apply_result", lambda *args, **kwargs: True)
+    opened: list[int] = []
+    monkeypatch.setattr(gui, "open_undo", lambda: opened.append(1))
+
+    gui._apply_done((ApplyReport(results=(), had_errors=False), ""))
+
+    assert opened == [1]

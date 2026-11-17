@@ -49,6 +49,25 @@ def _set_textbox(textbox: ctk.CTkTextbox, text: str) -> None:
     textbox.configure(state="disabled")
 
 
+def _undo_check_text(result) -> str:
+    """Человеческий итог проверки без внутреннего имени режима `dry-run`."""
+    status = str(getattr(result, "status", ""))
+    message = str(getattr(result, "message", "") or "").strip()
+    if status == "dry-run":
+        if message and message.casefold() != "dry-run":
+            return f"можно откатить ({message})"
+        return "можно откатить"
+    if status == "renamed":
+        return "откатано"
+    if status == "error":
+        return f"не удастся — {message}" if message else "не удастся"
+    if status == "journal-missing":
+        return message or "откат выполнен, журнал не записан"
+    if status == "skipped":
+        return f"пропущено — {message}" if message else "пропущено"
+    return f"{status} — {message}" if message else (status or "неизвестный результат")
+
+
 class ConfirmDialog(ctk.CTkToplevel):
     """Модальное подтверждение действия; результат доступен после закрытия."""
 
@@ -197,6 +216,7 @@ class ApplyResultDialog(ctk.CTkToplevel):
         self.protocol("WM_DELETE_WINDOW", self.destroy)
         self._log_path = log_path
         self._log_error = log_error
+        self.open_journal = False
 
         renamed = sum(1 for result in report.results if result.status == "renamed")
         errors = sum(1 for result in report.results if result.status == "error")
@@ -242,7 +262,7 @@ class ApplyResultDialog(ctk.CTkToplevel):
             hover_color=COLORS["border_light"],
             command=self.destroy,
         ).pack(side="right")
-        self._open_button = ctk.CTkButton(
+        self._journal_button = ctk.CTkButton(
             buttons,
             text="Открыть журнал",
             width=160,
@@ -250,11 +270,22 @@ class ApplyResultDialog(ctk.CTkToplevel):
             font=font(12, "bold"),
             fg_color=COLORS["green"],
             hover_color=COLORS["green_hover"],
-            command=self._open_log,
+            command=self._open_journal,
         )
-        self._open_button.pack(side="right", padx=(0, 10))
-        if log_error or not os.path.isfile(log_path):
-            self._open_button.configure(state="disabled")
+        self._journal_button.pack(side="right", padx=(0, 10))
+        self._csv_button = ctk.CTkButton(
+            buttons,
+            text="Открыть CSV",
+            width=140,
+            height=36,
+            font=font(12),
+            fg_color=COLORS["panel_2"],
+            hover_color=COLORS["border_light"],
+            command=self._open_csv,
+        )
+        self._csv_button.pack(side="right", padx=(0, 10))
+        if not os.path.isfile(log_path):
+            self._csv_button.configure(state="disabled")
 
         if log_error:
             ctk.CTkLabel(
@@ -286,8 +317,21 @@ class ApplyResultDialog(ctk.CTkToplevel):
                 lines.append(f"· {result.old_rel}: пропущено")
         return "\n".join(lines) or "Нет изменений."
 
-    def _open_log(self) -> None:
+    def _open_journal(self) -> None:
+        """Закрывает итог и просит главное окно открыть встроенный журнал."""
+        self.open_journal = True
+        self.destroy()
+
+    def _open_csv(self) -> None:
         if not os.path.isfile(self._log_path):
+            show_notice(
+                self,
+                "Файл журнала",
+                f"Файл не найден:\n{self._log_path}",
+                accent=COLORS["red"],
+                height=260,
+            )
+            self.grab_set()
             return
         try:
             if hasattr(os, "startfile"):
@@ -295,7 +339,15 @@ class ApplyResultDialog(ctk.CTkToplevel):
             else:
                 subprocess.Popen(["xdg-open", self._log_path])
         except OSError as exc:
-            self._open_button.configure(text=f"Не открылось: {clip(str(exc), 24)}")
+            show_notice(
+                self,
+                "Не удалось открыть CSV",
+                f"{self._log_path}\n\n{exc}",
+                accent=COLORS["red"],
+                height=260,
+            )
+        finally:
+            self.grab_set()
 
 
 def show_apply_result(
@@ -304,9 +356,11 @@ def show_apply_result(
     *,
     log_path: str,
     log_error: str = "",
-) -> None:
+) -> bool:
+    """Показывает итог; True — пользователь попросил открыть встроенный журнал."""
     dialog = ApplyResultDialog(master, report, log_path=log_path, log_error=log_error)
     master.wait_window(dialog)
+    return dialog.open_journal
 
 
 class CandidateDialog(ctk.CTkToplevel):
@@ -822,25 +876,62 @@ class UndoDialog(ctk.CTkToplevel):
             name="undo-preview",
         )
 
+    def _undo_root(self, targets: list, position: int) -> str:
+        """Корень выбранной строки; запасной вариант — текущая папка окна."""
+        if position < len(targets):
+            target = targets[position]
+            root = getattr(target, "root", None)
+            if root is None:
+                root = getattr(getattr(target, "entry", None), "root", None)
+            if root:
+                return str(root)
+        return str(self.current_folder or "")
+
     def _preview_ready(self, ids: list[str], has_legacy: bool, preview, selection) -> None:
         self._busy = False
         self._sync_button()
-        lines = [
-            f"{result.old_rel} → {result.new_rel}: {result.status} {result.message}".rstrip()
-            for result in preview.results
-        ]
-        lines += [f"пропуск: {error}" for error in selection.errors]
-        body = "Откат выбранных строк (предпросмотр):\n" + "\n".join(lines)
+        results = list(preview.results)
+        targets = list(getattr(selection, "targets", ()))
+        roots: list[str] = []
+        entries: list[str] = []
+        shown = 0
+        for position, result in enumerate(results):
+            root = self._undo_root(targets, position)
+            if root and root not in roots:
+                roots.append(root)
+            before = os.path.join(root, result.old_rel) if root else result.old_rel
+            after = os.path.join(root, result.new_rel) if root else result.new_rel
+            if position >= 6:
+                continue
+            entries.append(
+                f"{position + 1}. Было:  {before}\n"
+                f"   Станет: {after}\n"
+                f"   Проверка: {_undo_check_text(result)}"
+            )
+            shown += 1
+        if len(results) > shown:
+            entries.append(f"… и ещё {len(results) - shown}")
+        ready = sum(1 for result in results if result.status in ("dry-run", "renamed"))
+        folder_block = "Папка:\n" + "\n".join(roots) if roots else "Папка: не определена"
+        body = (
+            f"{folder_block}\n\n"
+            f"Будет откатано: {len(results)} из {len(ids)}\n"
+            f"Проверка: можно откатить {ready} из {len(results)}\n\n" + "\n\n".join(entries)
+        )
+        errors = list(getattr(selection, "errors", ()))
+        if errors:
+            body += "\n\nНе выбраны:\n" + "\n".join(errors[:5])
         if has_legacy:
             body += f"\nКорень для строк старого формата: {self.current_folder}"
+        body += "\n\nПроверка не меняет файлы; откат начнётся после подтверждения."
         confirmed = ask_confirm(
             self,
             "Откатить переименования?",
             body,
             confirm_text="Откатить",
             accent=COLORS["orange"],
-            width=760,
-            height=420,
+            width=820,
+            height=min(560, 320 + 112 * max(shown, 1)),
         )
         self.grab_set()
         self.lift()

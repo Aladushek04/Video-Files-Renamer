@@ -8,6 +8,7 @@ import pytest
 
 pytest.importorskip("customtkinter")
 
+from video_renamer.core.title_service import PreviewReport, PreviewRow
 from video_renamer.gui.app import RenamerGUI
 from video_renamer.gui.controller import RenamerController
 
@@ -138,6 +139,70 @@ def test_folder_path_is_shown_and_field_is_wide_enough(gui, tmp_path):
 def test_keyboard_shortcuts_stay_bound(gui):
     for sequence in ("<F5>", "<Control-Return>", "<Control-o>", "<Escape>", "<space>"):
         assert gui.bind_all(sequence), sequence
+
+
+LONG_OLD_NAME = "Очень длинное исходное имя файла — " + "Long filename part " * 6 + "конец.mp4"
+
+
+def test_columns_align_with_a_long_name_at_minimum_size(gui, tmp_path):
+    """Длинное имя не сдвигает «Кандидаты» и «Новое имя» от заголовков."""
+    gui.geometry(f"{MIN_SIZE[0]}x{MIN_SIZE[1]}+3000+3000")
+    row = PreviewRow(
+        True,
+        LONG_OLD_NAME,
+        "Studio - 01.01.2026 - Title.mp4",
+        "text",
+        0.9,
+        "s1",
+        "",
+        "h1",
+        10,
+        (),
+    )
+    gui.controller.set_folder(str(tmp_path))
+    gui.controller.apply_preview(PreviewReport((row,), (), False))
+    gui._refresh_rows(reset_scroll=True)
+    _settle(gui)
+
+    view = gui.rows_view.view_for(0)
+    assert view is not None, "строка должна быть отрисована"
+    columns = (
+        (1, view.old_label),
+        (2, view.candidate_menu),
+        (3, view.name_entry),
+        (4, view.source_badge),
+        (5, view.confidence_label),
+    )
+    for column, widget in columns:
+        assert abs(gui.header_labels[column].winfo_rootx() - widget.winfo_rootx()) <= 4, column
+
+    assert view.old_label.cget("text").endswith("…")
+    assert len(view.old_label.cget("text")) < len(LONG_OLD_NAME)
+
+
+def test_detail_panel_keeps_full_names(gui, tmp_path):
+    gui.geometry(f"{MIN_SIZE[0]}x{MIN_SIZE[1]}+3000+3000")
+    row = PreviewRow(
+        True,
+        LONG_OLD_NAME,
+        LONG_OLD_NAME + ".new.mp4",
+        "text",
+        0.9,
+        "s1",
+        "",
+        "h1",
+        10,
+        (),
+    )
+    gui.controller.set_folder(str(tmp_path))
+    gui.controller.apply_preview(PreviewReport((row,), (), False))
+    gui._refresh_rows(reset_scroll=True)
+    gui._on_select(0)
+    _settle(gui)
+
+    detail = gui.detail_box.get("1.0", "end")
+    assert row.old_rel in detail
+    assert row.new_rel in detail
 
 
 @pytest.mark.parametrize("scaling", [1.25, 1.5])

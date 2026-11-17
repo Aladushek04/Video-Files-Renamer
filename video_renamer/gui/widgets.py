@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tkinter as tk
+import tkinter.font as tkfont
 from collections.abc import Callable
 
 import customtkinter as ctk
@@ -27,6 +28,9 @@ _COLUMNS: tuple[tuple[int, int], ...] = (
     (104, 0),
     (54, 0),
 )
+
+_OLD_PADDING = 8
+_OLD_TEXT_LIMIT = _COLUMNS[1][0] - _OLD_PADDING
 
 
 def configure_row_columns(frame: ctk.CTkFrame) -> None:
@@ -113,6 +117,9 @@ class RowView(ctk.CTkFrame):
             text_color=COLORS["text"],
         )
         self.old_label.grid(row=0, column=1, padx=4, pady=8, sticky="ew")
+        # Собственный запрос ширины метки не должен расширять колонку: иначе
+        # длинное имя сдвигает «Кандидаты» и «Новое имя» правее заголовков.
+        self._old_font = self._text_measure_font()
 
         self.candidate_menu = ctk.CTkOptionMenu(
             self,
@@ -227,12 +234,44 @@ class RowView(ctk.CTkFrame):
         self._select()
         self._on_candidate(self.index, scene)
 
+    def _text_measure_font(self) -> tkfont.Font | None:
+        """Шрифт внутренней метки: измерение в тех же пикселях, что рисует Tk."""
+        try:
+            return tkfont.Font(
+                root=self.winfo_toplevel(),
+                font=self.old_label._label.cget("font"),
+            )
+        except (AttributeError, tk.TclError):
+            return None
+
+    def _fit_old_name(self, text: str) -> str:
+        """Обрезает имя по фактической ширине колонки, а не по числу символов.
+
+        Полное имя остаётся в панели выбранной строки; таблица должна держать
+        общую сетку колонок при любой длине названия.
+        """
+        if self._old_font is None:
+            return clip(text, 62)
+        if self._old_font.measure(text) <= _OLD_TEXT_LIMIT:
+            return text
+        ellipsis = "…"
+        low, high = 0, len(text)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if self._old_font.measure(text[:middle] + ellipsis) <= _OLD_TEXT_LIMIT:
+                low = middle
+            else:
+                high = middle - 1
+        if low == 0:
+            return ellipsis
+        return text[:low].rstrip() + ellipsis
+
     def refresh(self, row: PreviewRow) -> None:
         """Синхронизирует виджет с моделью без вызова пользовательских команд."""
         self._updating = True
         try:
             self.approved_var.set(row.approved)
-            self.old_label.configure(text=clip(row.old_rel, 62))
+            self.old_label.configure(text=self._fit_old_name(row.old_rel))
             self._current_basename = os.path.basename(row.new_rel)
             self.name_entry.delete(0, "end")
             self.name_entry.insert(0, self._current_basename)

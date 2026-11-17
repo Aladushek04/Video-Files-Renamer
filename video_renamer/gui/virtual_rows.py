@@ -104,7 +104,10 @@ class VirtualRowsView(ctk.CTkFrame):
         if self._rows:
             self._hide_empty()
         else:
-            self._show_empty()
+            self.show_empty_message(
+                "Нет строк",
+                "Нажмите Preview, чтобы собрать предложения.",
+            )
         self._refresh_pool()
 
     def set_selected_index(self, index: int | None) -> None:
@@ -292,19 +295,58 @@ class VirtualRowsView(ctk.CTkFrame):
 
     def _build_empty_frame(self) -> ctk.CTkFrame:
         frame = ctk.CTkFrame(self, fg_color="transparent")
-        ctk.CTkLabel(
+        self.empty_title = ctk.CTkLabel(
             frame,
             text="Нет строк",
             font=font(18, "bold"),
             text_color=COLORS["muted"],
-        ).pack()
-        ctk.CTkLabel(
+        )
+        self.empty_title.pack()
+        self.empty_hint = ctk.CTkLabel(
             frame,
             text="Нажмите Preview, чтобы собрать предложения.",
             font=font(12),
             text_color=COLORS["muted"],
-        ).pack(pady=(6, 0))
+        )
+        self.empty_hint.pack(pady=(6, 0))
+        self.empty_button = ctk.CTkButton(
+            frame,
+            text="Сбросить фильтр",
+            width=180,
+            height=34,
+            font=font(12),
+            fg_color=COLORS["panel_2"],
+            hover_color=COLORS["border_light"],
+            border_width=1,
+            border_color=COLORS["border"],
+            command=self._invoke_empty_action,
+        )
+        self._empty_action: Callable[[], None] | None = None
         return frame
+
+    def show_empty_message(
+        self,
+        title: str,
+        hint: str,
+        *,
+        action_text: str | None = None,
+        action: Callable[[], None] | None = None,
+    ) -> None:
+        """Показывает пустое состояние с объяснением и, если нужно, действием."""
+        self.empty_title.configure(text=title)
+        self.empty_hint.configure(text=hint)
+        self._empty_action = action
+        if action_text and action is not None:
+            self.empty_button.configure(text=action_text)
+            self.empty_button.pack(pady=(12, 0))
+        else:
+            self.empty_button.pack_forget()
+        self._show_empty()
+
+    def _invoke_empty_action(self) -> None:
+        action = self._empty_action
+        if action is not None:
+            action()
 
     def _show_empty(self) -> None:
         self._empty_frame.place(relx=0.5, rely=0.5, anchor="center")

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,7 @@ import pytest
 ctk = pytest.importorskip("customtkinter")
 
 from video_renamer.core.rename_log import ACTION_RENAME, LogEntry
+from video_renamer.core.title_service import ApplyReport, ApplyResult
 from video_renamer.gui import dialogs
 from video_renamer.gui.theme import COLORS
 
@@ -297,3 +299,137 @@ def test_close_is_refused_while_busy(ctk_root, tmp_path, monkeypatch, sync_runne
     dialog._busy = False
     dialog._on_close()
     assert not dialog.winfo_exists()
+
+
+def test_undo_confirmation_shows_folder_full_paths_and_check(
+    ctk_root, tmp_path, monkeypatch, sync_runner, headless_dialog
+):
+    entry = make_entry("old.mp4", "New Name.mp4")
+    monkeypatch.setattr(dialogs, "read_log", lambda path: [entry])
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        dialogs,
+        "ask_confirm",
+        lambda *args, **kwargs: captured.update(message=args[2]) or False,
+    )
+    target = SimpleNamespace(root=str(tmp_path), entry=entry)
+    monkeypatch.setattr(
+        dialogs,
+        "select_for_undo",
+        lambda entries, ids, **kwargs: SimpleNamespace(targets=[target], errors=[]),
+    )
+    preview = SimpleNamespace(
+        results=[make_result("New Name.mp4", "old.mp4", "dry-run", "dry-run")]
+    )
+    monkeypatch.setattr(dialogs, "run_undo", lambda selection, *, log_path, dry_run: preview)
+
+    dialog = make_dialog(ctk_root, tmp_path)
+    try:
+        dialog._items[0][1].set(True)
+        dialog._start_undo()
+
+        message = captured["message"]
+        assert str(tmp_path) in message
+        assert os.path.join(str(tmp_path), "New Name.mp4") in message
+        assert os.path.join(str(tmp_path), "old.mp4") in message
+        assert "Проверка: можно откатить 1 из 1" in message
+        assert "можно откатить" in message
+        assert "dry-run" not in message
+    finally:
+        dialog.destroy()
+
+
+def test_undo_confirmation_explains_blocked_rows(
+    ctk_root, tmp_path, monkeypatch, sync_runner, headless_dialog
+):
+    entry = make_entry("old.mp4", "New Name.mp4")
+    monkeypatch.setattr(dialogs, "read_log", lambda path: [entry])
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        dialogs,
+        "ask_confirm",
+        lambda *args, **kwargs: captured.update(message=args[2]) or False,
+    )
+    target = SimpleNamespace(root=str(tmp_path), entry=entry)
+    monkeypatch.setattr(
+        dialogs,
+        "select_for_undo",
+        lambda entries, ids, **kwargs: SimpleNamespace(targets=[target], errors=[]),
+    )
+    preview = SimpleNamespace(
+        results=[make_result("New Name.mp4", "old.mp4", "error", "target is occupied")]
+    )
+    monkeypatch.setattr(dialogs, "run_undo", lambda selection, *, log_path, dry_run: preview)
+
+    dialog = make_dialog(ctk_root, tmp_path)
+    try:
+        dialog._items[0][1].set(True)
+        dialog._start_undo()
+
+        message = captured["message"]
+        assert "Проверка: можно откатить 0 из 1" in message
+        assert "не удастся — target is occupied" in message
+    finally:
+        dialog.destroy()
+
+
+def _headless_apply_result(monkeypatch) -> None:
+    for method in ("grab_set", "lift", "focus_force"):
+        monkeypatch.setattr(
+            dialogs.ApplyResultDialog,
+            method,
+            lambda self, *args, **kwargs: None,
+        )
+
+
+def test_apply_result_journal_button_requests_builtin_journal(ctk_root, tmp_path, monkeypatch):
+    _headless_apply_result(monkeypatch)
+    log = tmp_path / "rename_log.csv"
+    log.write_text("timestamp,action\n", encoding="utf-8")
+    dialog = dialogs.ApplyResultDialog(
+        ctk_root,
+        ApplyReport(results=(ApplyResult("a.mp4", "A.mp4", "renamed", ""),), had_errors=False),
+        log_path=str(log),
+    )
+    try:
+        assert dialog._journal_button.cget("text") == "Открыть журнал"
+        assert dialog._csv_button.cget("text") == "Открыть CSV"
+
+        dialog._journal_button.invoke()
+
+        assert dialog.open_journal is True
+        assert not dialog.winfo_exists()
+    finally:
+        if dialog.winfo_exists():
+            dialog.destroy()
+
+
+def test_apply_result_csv_failure_is_a_separate_notice(ctk_root, tmp_path, monkeypatch):
+    _headless_apply_result(monkeypatch)
+    log = tmp_path / "rename_log.csv"
+    log.write_text("timestamp,action\n", encoding="utf-8")
+    notices: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        dialogs,
+        "show_notice",
+        lambda master, title, message, **kwargs: notices.append((title, message)),
+    )
+
+    def broken_startfile(path: str) -> None:
+        raise OSError("file is locked")
+
+    monkeypatch.setattr(dialogs.os, "startfile", broken_startfile, raising=False)
+    dialog = dialogs.ApplyResultDialog(
+        ctk_root,
+        ApplyReport(results=(), had_errors=False),
+        log_path=str(log),
+    )
+    try:
+        dialog._csv_button.invoke()
+
+        assert notices, "ошибка должна быть показана отдельным сообщением"
+        assert notices[0][0] == "Не удалось открыть CSV"
+        assert "file is locked" in notices[0][1]
+        assert dialog._csv_button.cget("text") == "Открыть CSV"
+    finally:
+        dialog.destroy()
