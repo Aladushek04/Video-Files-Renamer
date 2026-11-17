@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 pytest.importorskip("customtkinter")
 
+from video_renamer.core.rename_log import ACTION_RENAME, LogEntry, append_log
 from video_renamer.core.title_service import (
     ApplyReport,
     ApplyResult,
@@ -15,6 +18,7 @@ from video_renamer.core.title_service import (
 from video_renamer.gui import app as gui_app
 from video_renamer.gui.app import RenamerGUI
 from video_renamer.gui.controller import RenamerController
+from video_renamer.gui.dialogs import ApplyResultDialog, UndoDialog
 
 
 def row(old_rel: str = "original.mp4", new_rel: str = "changed.mp4") -> PreviewRow:
@@ -223,5 +227,88 @@ def test_apply_result_can_open_builtin_journal(gui, tmp_path, monkeypatch):
     monkeypatch.setattr(gui, "open_undo", lambda: opened.append(1))
 
     gui._apply_done((ApplyReport(results=(), had_errors=False), ""))
+    # Журнал открывается отложенно, вне текущего прохода диспетчера.
+    gui.update_idletasks()
 
     assert opened == [1]
+
+
+def test_journal_from_apply_result_loads_rows_with_real_dispatcher(gui, tmp_path):
+    """Журнал, открытый из итога apply, дожидается доставки строк диспетчером."""
+    append_log(
+        str(tmp_path / "log.csv"),
+        [
+            LogEntry(
+                timestamp="2026-11-18T10:00:00.000000Z",
+                action=ACTION_RENAME,
+                undoes="",
+                root=str(tmp_path),
+                old="old.mp4",
+                new="New.mp4",
+                oshash="h1",
+                size=10,
+                scene_id="s1",
+                source="fingerprint",
+                legacy=False,
+            )
+        ],
+    )
+    report = ApplyReport(
+        results=(ApplyResult("old.mp4", "New.mp4", "renamed", ""),),
+        had_errors=False,
+    )
+
+    gui.geometry("1180x700+3000+3000")
+    gui.deiconify()
+    gui.update()
+
+    state: dict[str, object] = {"done": False, "deadline": time.monotonic() + 8.0}
+
+    def find(cls):
+        for child in gui.winfo_children():
+            if isinstance(child, cls):
+                return child
+        return None
+
+    def close_dialogs() -> None:
+        for cls in (UndoDialog, ApplyResultDialog):
+            dialog = find(cls)
+            if dialog is not None:
+                dialog.destroy()
+
+    def poll() -> None:
+        if state["done"]:
+            return
+        result_dialog = find(ApplyResultDialog)
+        journal_button = getattr(result_dialog, "_journal_button", None)
+        if journal_button is not None and not state.get("journal_requested"):
+            state["journal_requested"] = True
+            journal_button.invoke()
+        journal = find(UndoDialog)
+        items = getattr(journal, "_items", None)
+        if items:
+            items[0][1].set(True)
+            journal._sync_button()
+            state["rows_loaded"] = len(items)
+            state["undo_state"] = journal.undo_button.cget("state")
+            state["done"] = True
+            journal.destroy()
+            return
+        if time.monotonic() > state["deadline"]:
+            state["done"] = True
+            state["timed_out"] = True
+            close_dialogs()
+            return
+        gui.after(20, poll)
+
+    gui.dispatcher.call_soon(gui._apply_done, (report, ""))
+    gui.after(20, poll)
+
+    while not state["done"] and time.monotonic() < state["deadline"] + 2:
+        gui.update()
+        time.sleep(0.01)
+
+    assert not state.get("timed_out"), "журнал так и не загрузил строки"
+    assert state.get("journal_requested"), "кнопка журнала не была нажата"
+    assert state.get("rows_loaded") == 1
+    assert state.get("undo_state") == "normal"

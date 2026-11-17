@@ -797,7 +797,10 @@ class RenamerGUI(ctk.CTk):
             log_error=log_error,
         )
         if open_journal:
-            self.open_undo()
+            # Не открывать журнал внутри текущего прохода диспетчера: его
+            # wait_window удержит _drain и следующая доставка read_log не
+            # будет запланирована, пока журнал не закроют.
+            self.after_idle(self.open_undo)
 
     def _apply_failed(self, exc: Exception) -> None:
         self._set_busy(False)
