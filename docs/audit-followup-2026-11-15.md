@@ -411,9 +411,11 @@
   нужна только pip/setuptools для сборки. `.env` и личные данные не читаются.
 - Фактический статус: workflow запускается на каждый push (не только в `main`),
   чтобы проверять ветки до PR. `push` ветки
-  `fix/audit-findings-2026-11-15` запустил CI; итоговый прогон
+  `fix/audit-findings-2026-11-15` запустил CI; прогон кода
   [`44172008637`](https://github.com/Aladushek04/Video-Files-Renamer/actions/runs/44172008637)
-  — все 7 заданий зелёные: Ruff, Wheel and clean install,
+  и документационный прогон
+  [`44172639356`](https://github.com/Aladushek04/Video-Files-Renamer/actions/runs/44172639356)
+  — оба полностью зелёные: Ruff, Wheel and clean install,
   Python 3.10/3.11/3.12/3.13/3.14.
 - Первые два прогона упали и были исправлены: (1) тест рекомендованного окна
   1440×900 на виртуальном экране CI 1024×768 — теперь он пропускается с
