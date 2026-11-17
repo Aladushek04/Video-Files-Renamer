@@ -664,8 +664,11 @@
   `test_intent_write_failure_renames_nothing`,
   `test_undo_intent_failure_renames_nothing`.
 - Остановка процесса после первого `rename` и повторный запуск:
-  `test_process_crash_after_first_rename_is_recoverable` (дочерний процесс
-  делает `os._exit`, затем `repair --apply`).
+  `test_process_crash_after_first_rename_is_recoverable` (apply) и
+  `test_process_crash_during_undo_is_recoverable` (undo) — дочерний процесс
+  делает `os._exit`, затем `repair --apply`; для undo проверяются: исходное
+  имя восстановлено, в CSV одна строка `undo` со ссылкой на `rename`, повторный
+  `repair` не меняет файл журнала.
 - Final и rollback падают оба: `test_failed_final_and_rollback_keeps_operation_open` —
   остаётся `needs_repair`, `repair` завершает и пишет ровно одну строку.
 - Записка журнала без `done` не дублируется:
@@ -765,7 +768,7 @@
 ## 7. Проверки и их границы
 
 - Окружение проекта `.venv` (Python 3.14.10, `textual` 8.2.8,
-  customtkinter 5.2.2): **660 passed, 2 skipped**. Пропуски: тест PHASH с
+  customtkinter 5.2.2): **661 passed, 2 skipped**. Пропуски: тест PHASH с
   локальным образцом и сборка sdist, потому что модуль `build` в `.venv` не
   установлен (wheel-проверки при этом выполняются). GUI- и TUI-тесты
   выполнялись, а не пропускались; `tests/test_wheel_install.py` собирает wheel,
@@ -773,10 +776,10 @@
   `setuptools==77.0.3`.
 - Ядро/CLI/скрипты/UI на других версиях Python (через `uv run --no-project`,
   окружения не смешивались с проектом):
-  - 3.10.22 — 650 passed, 5 skipped;
-  - 3.11.18 — 650 passed, 5 skipped;
-  - 3.12.16 — 652 passed, 3 skipped.
-  Во всех трёх прогонах собирается один и тот же набор из 655 тестов
+  - 3.10.22 — 651 passed, 5 skipped;
+  - 3.11.18 — 651 passed, 5 skipped;
+  - 3.12.16 — 654 passed, 2 skipped.
+  Во всех трёх прогонах собирается один и тот же набор из 656 тестов
   (без `test_wheel_install.py`). Пропуски только с явной причиной:
   PHASH-образец, нативные проверки `os.path.isjunction` на 3.10–3.11 и
   GUI-модули, которым в сборке uv не хватило Tcl (наличие Tcl в сборках uv

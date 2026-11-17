@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from video_renamer.cli import append_rename_log
+from video_renamer.cli import append_rename_log, main
 from video_renamer.core import review_actions, title_service
 from video_renamer.core import undo as undo_module
 from video_renamer.core.file_lock import LockBusy, RenamerLock
@@ -467,6 +467,75 @@ def test_process_crash_after_first_rename_is_recoverable(tmp_path):
         str(root), [make_row(root / "c.mp4", "d.mp4")], log_path=str(log)
     )
     assert follow_up.results[0].status == "renamed"
+
+
+def test_process_crash_during_undo_is_recoverable(tmp_path):
+    """Падение undo после первого rename: repair возвращает имя и одну строку CSV."""
+    root = tmp_path / "videos"
+    root.mkdir()
+    make_video(root / "a.mp4", b"a" * 100)
+    log = root / "rename_log.csv"
+    legacy_apply(root, [("a.mp4", "b.mp4")])
+    rename_entry = active_renames(read_log(str(log)))[0]
+
+    script = tmp_path / "crash_undo.py"
+    script.write_text(
+        "\n".join(
+            (
+                "import os",
+                f"import sys; sys.path.insert(0, {str(ROOT)!r})",
+                "from video_renamer.cli import main",
+                "import video_renamer.core.title_service as ts",
+                f"log = {str(log)!r}",
+                f"identifier = {rename_entry.id!r}",
+                "real_rename = os.rename",
+                "count = {'n': 0}",
+                "def crashing(source, target):",
+                "    real_rename(source, target)",
+                "    count['n'] += 1",
+                "    if count['n'] == 1:",
+                "        os._exit(9)",
+                "ts.os.rename = crashing",
+                "os._exit(main(['undo', '--ids', identifier, '--log', log, '--apply']))",
+            )
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+
+    assert result.returncode == 9, result.stderr
+    assert not (root / "a.mp4").exists()
+    assert not (root / "b.mp4").exists()
+    assert len(list(root.glob("__ren_tmp_*"))) == 1
+    states, problems = read_intent_states(str(log))
+    assert problems == []
+    assert states[-1].intent.kind == "undo"
+    assert states[-1].is_open
+
+    assert main(["repair", "--log", str(log), "--apply"]) == 0
+    assert (root / "a.mp4").read_bytes() == b"a" * 100
+    assert not (root / "b.mp4").exists()
+    assert not list(root.glob("__ren_tmp_*"))
+    entries = read_log(str(log))
+    assert [entry.action for entry in entries] == ["rename", "undo"]
+    undo_entry = entries[1]
+    assert (undo_entry.old, undo_entry.new) == ("b.mp4", "a.mp4")
+    assert undo_entry.undoes == rename_entry.id
+    assert active_renames(entries) == []
+
+    before = (log.read_bytes(), (root / "a.mp4").read_bytes())
+    assert main(["repair", "--log", str(log), "--apply"]) == 0
+    after = (log.read_bytes(), (root / "a.mp4").read_bytes())
+    assert after == before
+    assert len(read_log(str(log))) == 2
 
 
 def test_failed_final_and_rollback_keeps_operation_open(tmp_path, monkeypatch):
