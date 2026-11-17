@@ -150,11 +150,13 @@ def test_log_write_problem_accepts_usable_path(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
-def test_log_write_problem_keeps_existing_log_intact(tmp_path):
+def test_log_write_problem_rejects_unknown_header_without_touching_file(tmp_path):
     path = tmp_path / "rename_log.csv"
     path.write_text("header\n", encoding="utf-8")
 
-    assert log_write_problem(str(path)) == ""
+    problem = log_write_problem(str(path))
+
+    assert "format" in problem
     assert path.read_text(encoding="utf-8") == "header\n"
 
 

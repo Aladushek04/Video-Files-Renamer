@@ -423,7 +423,7 @@ def test_apply_log_failure_does_not_hide_results(tmp_path, monkeypatch):
     def broken_log(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr(review_actions, "append_rename_log", broken_log)
+    monkeypatch.setattr(review_actions, "append_missing_log", broken_log)
     video = tmp_path / "old1.mp4"
     video.write_bytes(b"abcdefghij")
     row = PreviewRow(
@@ -441,6 +441,7 @@ def test_apply_log_failure_does_not_hide_results(tmp_path, monkeypatch):
     async def run() -> None:
         app = RenamerApp(
             folder=str(tmp_path),
+            log_path=str(tmp_path / "rename_log.csv"),
             preview_factory=lambda folder, progress: PreviewReport(
                 rows=(row,), warnings=(), had_transient_errors=False
             ),

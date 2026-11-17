@@ -34,6 +34,10 @@ preview.csv
 preview*.csv
 rename_log.csv
 rename_log*.csv
+
+# --- Карта намерения и межпроцессный замок (A02/A03) ---
+rename_intent*.jsonl
+rename_log*.lock
 *.tmp
 
 # --- Скрапер студий ---

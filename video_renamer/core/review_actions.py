@@ -14,12 +14,23 @@ from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
 from video_renamer.core.clean_ph_names import load_studios
+from video_renamer.core.file_lock import RenamerLock
 from video_renamer.core.fingerprint_sources import build_fingerprint_clients
 from video_renamer.core.performer_names import PerformerIndex
+from video_renamer.core.rename_intent import (
+    KIND_RENAME,
+    Intent,
+    PlannedStep,
+    raise_if_blocked,
+    record_phase,
+    unresolved_steps,
+    write_intent,
+)
 from video_renamer.core.rename_log import (
     ACTION_RENAME,
     LogEntry,
     append_log,
+    append_missing_log,
     format_log_timestamp,
     log_write_problem,
 )
@@ -214,48 +225,128 @@ def apply_rows(
     rows: Sequence[PreviewRow],
     *,
     log_path: str | Path,
+    force: bool = False,
+    suffix_collisions: bool = False,
 ) -> tuple[ApplyReport, str]:
     """Переименовывает строки и пишет журнал.
 
-    Возвращает отчёт и текст ошибки журнала. Если журнал нельзя дописать,
-    ни один файл не перемещается: все одобренные строки получают `error`
-    с причиной (проверка до изменения диска). Сбой записи уже после rename
-    по-прежнему не отменяет переименование.
+    Возвращает отчёт и текст ошибки журнала. Работа идёт под общим замком: он
+    покрывает проверку намерения, все rename и запись журнала. Если журнал или
+    карта намерения недоступны, ни один файл не перемещается. Карта пишется до
+    первого rename и хранит всю партию, чтобы `repair` мог разобрать сбой.
     """
     root = str(root)
     if not root:
         raise ValueError("Не выбрана папка для переименования")
     rows = list(rows)
     approved = [row for row in rows if row.approved]
-    journal_problem = log_write_problem(log_path) if approved else ""
-    if journal_problem:
-        results = tuple(
-            ApplyResult(
-                row.old_rel,
-                row.new_rel,
-                "error",
-                f"journal is not writable: {journal_problem}",
-            )
-            if row.approved
-            else ApplyResult(row.old_rel, row.new_rel, "skipped", "not approved")
-            for row in rows
+    if not approved:
+        return (
+            ApplyReport(
+                results=tuple(
+                    ApplyResult(row.old_rel, row.new_rel, "skipped", "not approved") for row in rows
+                ),
+                had_errors=False,
+            ),
+            "",
         )
-        return ApplyReport(results=results, had_errors=True), ""
-    service = TitleService(root, {}, None)
-    report = service.apply_rows(rows, dry_run=False)
-    log_error = ""
-    if any(result.status == "renamed" for result in report.results):
-        try:
-            append_rename_log(
-                str(log_path),
-                rows,
-                report.results,
-                format_log_timestamp(),
-                root=root,
+
+    # Быстрая проверка без замка: если папка журнала недоступна, замок тоже
+    # создать нельзя, а пользователю нужен понятный отчёт, а не трассировка.
+    journal_problem = log_write_problem(log_path)
+    if journal_problem:
+        return _journal_error_report(rows, journal_problem), ""
+
+    with RenamerLock(log_path):
+        raise_if_blocked(log_path)
+        journal_problem = log_write_problem(log_path)
+        if journal_problem:
+            return _journal_error_report(rows, journal_problem), ""
+
+        timestamp = format_log_timestamp()
+        intent_box: dict[str, Intent] = {}
+
+        def plan_hook(steps: tuple[PlannedStep, ...]) -> None:
+            log_rows = _rename_log_rows(steps, timestamp)
+            intent_box["intent"] = write_intent(
+                log_path,
+                kind=KIND_RENAME,
+                steps=list(steps),
+                log_rows=log_rows,
             )
-        except Exception as exc:
+
+        service = TitleService(root, {}, None)
+        report = service.apply_rows(
+            rows,
+            dry_run=False,
+            force=force,
+            suffix_collisions=suffix_collisions,
+            plan_hook=plan_hook,
+        )
+
+        intent = intent_box.get("intent")
+        if intent is None:
+            return report, ""
+
+        final = {
+            result.old_rel: result.new_rel
+            for result in report.results
+            if result.status == "renamed"
+        }
+        rows_to_log = [row for row in intent.log_rows if final.get(row["old"]) == row["new"]]
+        log_error = ""
+        problems: list[str] = []
+        try:
+            append_missing_log(
+                str(log_path),
+                [LogEntry(legacy=False, **row) for row in rows_to_log],
+            )
+        except (OSError, ValueError) as exc:
             log_error = str(exc) or exc.__class__.__name__
-    return report, log_error
+            problems.append(f"журнал не записан: {log_error}")
+
+        problems.extend(unresolved_steps(intent))
+        try:
+            record_phase(
+                log_path,
+                intent.op_id,
+                "needs_repair" if problems else "done",
+                problems,
+            )
+        except OSError as exc:
+            # Операция остаётся открытой: repair допишет фазу по диску.
+            log_error = log_error or f"не удалось записать состояние: {exc}"
+        return report, log_error
+
+
+def _rename_log_rows(steps: Sequence[PlannedStep], timestamp: str) -> list[dict]:
+    """Строки журнала для партии; id вычисляется из тех же полей при чтении."""
+    return [
+        {
+            "timestamp": timestamp,
+            "action": ACTION_RENAME,
+            "undoes": "",
+            "root": step.root,
+            "old": step.old_rel,
+            "new": step.new_rel,
+            "oshash": step.oshash,
+            "size": step.size,
+            "scene_id": step.scene_id,
+            "source": step.source,
+        }
+        for step in steps
+    ]
+
+
+def _journal_error_report(rows: Sequence[PreviewRow], problem: str) -> ApplyReport:
+    """Все одобренные строки получают ошибку, неодобренные — `skipped`."""
+    results = tuple(
+        ApplyResult(row.old_rel, row.new_rel, "error", f"journal is not writable: {problem}")
+        if row.approved
+        else ApplyResult(row.old_rel, row.new_rel, "skipped", "not approved")
+        for row in rows
+    )
+    return ApplyReport(results=results, had_errors=any(row.approved for row in rows))
 
 
 def remove_renamed(rows: Iterable[PreviewRow], report: ApplyReport) -> list[PreviewRow]:

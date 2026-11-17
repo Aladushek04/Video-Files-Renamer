@@ -160,6 +160,41 @@ def test_undo_chain_restores_both(tmp_path):
     assert not (tmp_path / "c.mp4").exists()
 
 
+def test_undo_two_operations_in_one_second(tmp_path):
+    log = tmp_path / "rename_log.csv"
+    write(tmp_path / "a.mp4", b"a" * 100)
+    first = datetime(2026, 11, 6, 10, 0, 0, 100000, tzinfo=timezone.utc)
+    second = datetime(2026, 11, 6, 10, 0, 0, 900000, tzinfo=timezone.utc)
+    apply_pairs(tmp_path, log, [("a.mp4", "b.mp4")], moment=first)
+    apply_pairs(tmp_path, log, [("b.mp4", "c.mp4")], moment=second)
+    ids = [entry.id for entry in active_renames(entries_of(log))]
+
+    report = run_undo(select_for_undo(entries_of(log), ids), log_path=str(log), dry_run=False)
+
+    assert report.had_errors is False
+    assert [result.status for result in report.results] == ["renamed", "renamed"]
+    assert (tmp_path / "a.mp4").read_bytes() == b"a" * 100
+    assert not (tmp_path / "b.mp4").exists()
+    assert not (tmp_path / "c.mp4").exists()
+
+
+def test_undo_swap_within_one_batch(tmp_path):
+    log = tmp_path / "rename_log.csv"
+    write(tmp_path / "a.mp4", b"A" * 100)
+    write(tmp_path / "b.mp4", b"B" * 100)
+    apply_pairs(tmp_path, log, [("a.mp4", "b.mp4"), ("b.mp4", "a.mp4")], moment=MOMENT_1)
+    assert (tmp_path / "a.mp4").read_bytes() == b"B" * 100
+    assert (tmp_path / "b.mp4").read_bytes() == b"A" * 100
+    ids = [entry.id for entry in active_renames(entries_of(log))]
+
+    report = run_undo(select_for_undo(entries_of(log), ids), log_path=str(log), dry_run=False)
+
+    assert report.had_errors is False
+    assert (tmp_path / "a.mp4").read_bytes() == b"A" * 100
+    assert (tmp_path / "b.mp4").read_bytes() == b"B" * 100
+    assert not list(tmp_path.glob("__ren_tmp_*"))
+
+
 def test_undo_rejects_already_undone_row(tmp_path):
     log = tmp_path / "rename_log.csv"
     write(tmp_path / "a.mp4", b"a" * 100)
@@ -195,7 +230,7 @@ def test_undo_reports_unwritten_journal(tmp_path, monkeypatch):
     def fail(path, entries):
         raise LogMigrationError("journal is locked")
 
-    monkeypatch.setattr(undo_module, "append_log", fail)
+    monkeypatch.setattr(undo_module, "append_missing_log", fail)
     report = run_undo(
         select_for_undo(entries_of(log), [entry.id]), log_path=str(log), dry_run=False
     )
@@ -248,7 +283,8 @@ def test_undo_three_sequential_renames(tmp_path):
     assert report.had_errors is False
     assert [result.status for result in report.results] == ["renamed"] * 3
     assert (tmp_path / "a.mp4").exists()
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["a.mp4", "rename_log.csv"]
+    assert sorted(path.name for path in tmp_path.glob("*.mp4")) == ["a.mp4"]
+    assert not list(tmp_path.glob("__ren_tmp_*"))
 
 
 def test_undo_sequential_keeps_other_files_touched(tmp_path):

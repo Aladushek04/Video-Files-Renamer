@@ -422,6 +422,8 @@ def test_apply_dry_run_does_not_rename_or_log(tmp_path):
 
 
 def test_apply_log_write_error_exits_1(tmp_path, monkeypatch, capsys):
+    from video_renamer.core import review_actions
+
     row = _row(tmp_path)
     csv_path = tmp_path / "preview.csv"
     write_preview_csv(str(csv_path), [row])
@@ -429,7 +431,7 @@ def test_apply_log_write_error_exits_1(tmp_path, monkeypatch, capsys):
     def boom(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr(fix_video_titles, "append_rename_log", boom)
+    monkeypatch.setattr(review_actions, "append_missing_log", boom)
     code = main(
         [
             "apply",

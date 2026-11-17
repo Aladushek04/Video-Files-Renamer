@@ -41,6 +41,7 @@ from video_renamer.core.fs_links import is_junction
 from video_renamer.core.oshash import OshashError, oshash_from_path
 from video_renamer.core.performer_names import PerformerIndex
 from video_renamer.core.phash import PhashError, format_phash, phash_from_path
+from video_renamer.core.rename_intent import PlannedStep
 from video_renamer.core.stashdb_client import (
     Scene,
     StashDBAuthError,
@@ -179,6 +180,15 @@ class _ApplyItem:
     new_rel: str
     temp_path: str | None = None
     renamed: bool = False
+
+
+def new_temp_path(old_path: str) -> str:
+    """Уникальное временное имя в той же папке, что и источник."""
+    directory = os.path.dirname(old_path)
+    while True:
+        candidate = os.path.join(directory, _TMP_PREFIX + uuid4().hex)
+        if not os.path.lexists(candidate):
+            return candidate
 
 
 def _extension(name: str) -> str:
@@ -506,12 +516,20 @@ class TitleService:
         dry_run: bool = True,
         force: bool = False,
         suffix_collisions: bool = False,
+        plan_hook: Callable[[tuple[PlannedStep, ...]], None] | None = None,
+        temp_paths: Mapping[str, str] | None = None,
     ) -> ApplyReport:
         """Проверяет и двухфазно переименовывает одобренные строки.
 
         Неодобренные строки пропускаются до обращения к файловой системе.
         В dry-run выполняются те же проверки и разрешение коллизий, но ни один
         `os.rename` не вызывается.
+
+        `plan_hook` получает всю партию (точные old/temp/new пути) до первого
+        `os.rename`: вызывающий пишет карту намерения и может прервать
+        операцию, бросив `OSError`. `temp_paths` — заранее выбранные
+        временные пути (ключ — `_path_key(old_path)`), чтобы undo и repair
+        использовали те же имена, что записаны в карте.
 
         В `ApplyResult` для переименованной строки `new_rel` — фактическая
         цель после разрешения коллизий (включая добавленный ` (2)` при
@@ -564,9 +582,46 @@ class TitleService:
                 )
             return self._apply_report(results)
 
+        planned_temps: dict[int, str] = {}
+        steps: list[PlannedStep] = []
+        for item in ready:
+            temp_path = None
+            if temp_paths is not None:
+                temp_path = temp_paths.get(_path_key(item.old_path))
+            if not temp_path:
+                temp_path = new_temp_path(item.old_path)
+            planned_temps[item.index] = temp_path
+            steps.append(
+                PlannedStep(
+                    old_path=item.old_path,
+                    temp_path=temp_path,
+                    new_path=item.new_path,
+                    old_rel=item.row.old_rel,
+                    new_rel=item.new_rel,
+                    root=self._root,
+                    oshash=item.row.oshash,
+                    size=item.row.size,
+                    scene_id=item.row.scene_id,
+                    source=item.row.source,
+                )
+            )
+        if plan_hook is not None:
+            try:
+                plan_hook(tuple(steps))
+            except OSError as exc:
+                message = str(exc) or exc.__class__.__name__
+                for item in ready:
+                    results[item.index] = ApplyResult(
+                        item.row.old_rel,
+                        item.new_rel,
+                        "error",
+                        f"cannot record rename intent: {message}",
+                    )
+                return self._apply_report(results)
+
         active: list[_ApplyItem] = []
         for item in ready:
-            temp_path = self._new_apply_temp_path(item.old_path)
+            temp_path = planned_temps[item.index]
             try:
                 os.rename(item.old_path, temp_path)
             except OSError as exc:
@@ -709,11 +764,7 @@ class TitleService:
     @staticmethod
     def _new_apply_temp_path(old_path: str) -> str:
         """Уникальное временное имя в той же папке, что и источник."""
-        directory = os.path.dirname(old_path)
-        while True:
-            candidate = os.path.join(directory, _TMP_PREFIX + uuid4().hex)
-            if not os.path.lexists(candidate):
-                return candidate
+        return new_temp_path(old_path)
 
     def _rollback_apply_item(
         self,

@@ -54,7 +54,7 @@ def test_apply_rows_survives_log_failure(tmp_path, monkeypatch):
     def broken_log(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr(review_actions, "append_rename_log", broken_log)
+    monkeypatch.setattr(review_actions, "append_missing_log", broken_log)
 
     report, log_error = apply_rows(
         str(tmp_path),

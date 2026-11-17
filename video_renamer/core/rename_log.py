@@ -27,6 +27,7 @@ __all__ = [
     "LogMigrationError",
     "active_renames",
     "append_log",
+    "append_missing_log",
     "entry_id",
     "format_log_timestamp",
     "log_write_problem",
@@ -267,27 +268,46 @@ def log_write_problem(path: str | os.PathLike[str]) -> str:
     """Можно ли дописать журнал; пустая строка — можно.
 
     Проверка выполняется до изменения файлов на диске: при сбое подготовки
-    журнала переименования не начинаются. Это не заменяет запись намерения до
-    rename — при аварийном завершении или полном диске всё равно нужна
-    восстановимая запись состояния — но убирает частый случай «файлы
-    переименованы, истории нет».
+    журнала переименования не начинаются. Она включает доступность папки,
+    пробную запись и проверку заголовка: чужой формат не будет дописан
+    (`LogMigrationError`), а старый формат перенесётся при записи.
     """
     target = os.path.abspath(os.fspath(path))
     parent = os.path.dirname(target)
     try:
         if parent:
             os.makedirs(parent, exist_ok=True)
+        if os.path.exists(target) and not os.path.isfile(target):
+            raise OSError(f"not a file: {target}")
         if os.path.isfile(target):
             descriptor = os.open(target, os.O_WRONLY | os.O_APPEND)
             os.close(descriptor)
+            if os.path.getsize(target) > 0 and not _is_legacy_file(target):
+                _refuse_unknown_header(target)
         probe_descriptor, probe_path = tempfile.mkstemp(
             prefix=".renamer-journal-", dir=parent or "."
         )
         os.close(probe_descriptor)
         os.unlink(probe_path)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return str(exc) or exc.__class__.__name__
     return ""
+
+
+def append_missing_log(path: str, entries: Sequence[LogEntry]) -> int:
+    """Дописывает только строки, которых ещё нет в журнале (сравнение по id).
+
+    Идемпотентно: повторный `repair` после падения между записью CSV и
+    отметкой о завершении не создаст дубликат. Возвращает число добавленных
+    строк.
+    """
+    if not entries:
+        return 0
+    existing = {entry.id for entry in read_log(path)}
+    missing = [entry for entry in entries if entry.id not in existing]
+    if missing:
+        append_log(path, missing)
+    return len(missing)
 
 
 def append_log(path: str, entries: Sequence[LogEntry]) -> None:

@@ -13,7 +13,9 @@ CSV-ревью, печать и коды возврата, а вся логик�
 
 `preview` никогда не переименовывает файлы. `apply` по умолчанию dry-run и
 пишет `rename_log.csv` только для фактически переименованных строк при
-явном `--apply`.
+явном `--apply`. `apply` и `undo` работают под межпроцессным замком и пишут
+карту намерения до первого rename; `repair` показывает или безопасно
+доводит прерванную операцию (изменения — только с `--apply`).
 """
 
 import argparse
@@ -24,21 +26,23 @@ import sys
 from collections.abc import Sequence
 
 from video_renamer.core.clean_ph_names import load_studios
+from video_renamer.core.file_lock import LockBusy
 from video_renamer.core.fingerprint_sources import (
     build_fingerprint_clients,
     missing_secondary_keys,
 )
 from video_renamer.core.performer_names import PerformerIndex
 from video_renamer.core.phash import PhashToolError, check_phash_tools
+from video_renamer.core.rename_intent import PendingOperationError
 from video_renamer.core.rename_log import (
     _guard_formula,
     _unguard_formula,
     active_renames,
-    format_log_timestamp,
     log_write_problem,
     read_log,
 )
-from video_renamer.core.review_actions import append_rename_log
+from video_renamer.core.repair import repair
+from video_renamer.core.review_actions import append_rename_log, apply_rows
 from video_renamer.core.stashdb_client import (
     StashDBAuthError,
     StashDBClient,
@@ -169,11 +173,6 @@ def read_preview_csv(path: str) -> list[PreviewRow]:
     return rows
 
 
-def _timestamp() -> str:
-    """Метка времени журнала: одна функция для CLI и TUI."""
-    return format_log_timestamp()
-
-
 def _build_parser() -> argparse.ArgumentParser:
     """Аргументы `preview` и `apply`."""
     parser = argparse.ArgumentParser(
@@ -251,6 +250,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--confirm-legacy", action="store_true", help="allow undoing legacy rows (requires --root)"
     )
     undo.set_defaults(handler=_run_undo)
+
+    repair_parser = subparsers.add_parser(
+        "repair", help="inspect or finish an interrupted apply/undo"
+    )
+    repair_parser.add_argument(
+        "--log", default=DEFAULT_LOG, help="rename log path (default: rename_log.csv)"
+    )
+    repair_parser.add_argument(
+        "--apply", action="store_true", help="finish safe steps (default: inspect only)"
+    )
+    repair_parser.set_defaults(handler=_run_repair)
 
     return parser
 
@@ -397,12 +407,26 @@ def _run_apply(args: argparse.Namespace, _parser: argparse.ArgumentParser) -> in
             )
             return 2
 
-    report = TitleService(root, {}, None).apply_rows(
-        rows,
-        dry_run=not args.apply,
-        force=args.force,
-        suffix_collisions=args.suffix_collisions,
-    )
+    if args.apply:
+        try:
+            report, log_error = apply_rows(
+                root,
+                rows,
+                log_path=args.log,
+                force=args.force,
+                suffix_collisions=args.suffix_collisions,
+            )
+        except (LockBusy, PendingOperationError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+    else:
+        report = TitleService(root, {}, None).apply_rows(
+            rows,
+            dry_run=True,
+            force=args.force,
+            suffix_collisions=args.suffix_collisions,
+        )
+        log_error = ""
 
     renamed = 0
     skipped = 0
@@ -421,15 +445,12 @@ def _run_apply(args: argparse.Namespace, _parser: argparse.ArgumentParser) -> in
                 file=sys.stderr,
             )
 
-    if args.apply and renamed:
-        try:
-            append_rename_log(args.log, rows, report.results, _timestamp(), root=root)
-        except OSError as exc:
-            print(
-                f"error: cannot write rename log {args.log}: {exc}",
-                file=sys.stderr,
-            )
-            errors += 1
+    if args.apply and log_error:
+        print(
+            f"error: cannot write rename log {args.log}: {log_error}",
+            file=sys.stderr,
+        )
+        errors += 1
 
     mode = "applied" if args.apply else "dry-run"
     print(f"{mode}: {renamed} renamed, {skipped} skipped, {errors} error(s)")
@@ -469,7 +490,11 @@ def _run_undo(args: argparse.Namespace, _parser: argparse.ArgumentParser) -> int
     for error in selection.errors:
         print(f"error: {error}", file=sys.stderr)
 
-    report = run_undo(selection, log_path=args.log, dry_run=not args.apply)
+    try:
+        report = run_undo(selection, log_path=args.log, dry_run=not args.apply)
+    except (LockBusy, PendingOperationError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     undone = 0
     failed = 0
     for result in report.results:
@@ -486,6 +511,46 @@ def _run_undo(args: argparse.Namespace, _parser: argparse.ArgumentParser) -> int
     mode = "undo" if args.apply else "undo (dry-run)"
     print(f"{mode}: {undone} undone, {failed + len(selection.errors)} error(s)")
     return 1 if (selection.errors or report.had_errors) else 0
+
+
+def _run_repair(args: argparse.Namespace, _parser: argparse.ArgumentParser) -> int:
+    """Показывает или доводит незавершённые операции; без --apply ничего не меняет."""
+    try:
+        report = repair(args.log, apply_changes=args.apply)
+    except LockBusy as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    for problem in report.problems:
+        print(f"error: {problem}", file=sys.stderr)
+    if not report.diagnoses:
+        if report.problems:
+            return 2
+        print("незавершённых операций нет")
+        return 0
+
+    for op in report.diagnoses:
+        intent = op.state.intent
+        print(f"операция {intent.op_id} ({intent.kind}, {intent.created}): {op.state.phase}")
+        for step in op.steps:
+            print(f"  {step.step.old_rel} -> {step.step.new_rel}: {step.message}")
+        for identifier in op.unexpected_log:
+            print(f"  в журнале есть строка для незавершённого шага: {identifier}")
+
+    if not args.apply:
+        print("просмотр: изменения не вносились (добавьте --apply)")
+        return 2 if report.problems else 1
+
+    for action in report.applied:
+        print(action)
+    if report.remaining:
+        print(
+            "остались незавершённые операции: " + ", ".join(report.remaining),
+            file=sys.stderr,
+        )
+        return 2 if report.problems else 1
+    print("восстановление завершено")
+    return 2 if report.problems else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
