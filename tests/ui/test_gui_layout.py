@@ -44,18 +44,25 @@ def _mapped_size(widget) -> bool:
 
 @pytest.fixture
 def gui(tmp_path):
+    import customtkinter as ctk
+
     tkinter = pytest.importorskip("tkinter")
+    # Фиксируем 100% и 96 dpi: на CI другой DPI иначе проверял бы другую
+    # метрику шрифта, а «рекомендованный» размер заявлен для обычного экрана.
+    ctk.set_widget_scaling(1.0)
     controller = RenamerController(log_path=str(tmp_path / "log.csv"))
     try:
         window = RenamerGUI(controller=controller)
     except (RuntimeError, tkinter.TclError) as exc:
         pytest.skip(f"Tk недоступен: {exc}")
+    window.tk.call("tk", "scaling", 96 / 72)
     window.geometry("+3000+3000")
     _settle(window)
     try:
         yield window
     finally:
         window.destroy()
+        ctk.set_widget_scaling(1.0)
 
 
 @pytest.mark.parametrize("size", [RECOMMENDED_SIZE, MIN_SIZE])
